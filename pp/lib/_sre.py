@@ -25,7 +25,6 @@ Limitations (also in BLOCKERS.md):
 * Pattern._fail_after (debug builds only) is not provided.
 """
 
-import operator as _operator
 
 __all__ = [
     "MAGIC", "CODESIZE", "MAXREPEAT", "MAXGROUPS", "getcodesize",
@@ -200,6 +199,16 @@ def unicode_tolower(character):
 # ---------------------------------------------------------------------------
 # subject handling
 
+def _index(x):
+    if type(x) is int:
+        return x
+    m = getattr(type(x), "__index__", None)
+    if m is None:
+        raise TypeError("'%s' object cannot be interpreted as an integer"
+                        % type(x).__name__)
+    return m(x)
+
+
 def _bad_string(string):
     return TypeError("expected string or bytes-like object, got '%s'"
                      % type(string).__name__)
@@ -254,8 +263,8 @@ class _State:
         if not isbytes and pattern._isbytes > 0:
             raise TypeError("cannot use a bytes pattern on a string-like object")
         length = len(data)
-        start = _operator.index(start)
-        end = _operator.index(end)
+        start = _index(start)
+        end = _index(end)
         if start < 0:
             start = 0
         elif start > length:
@@ -1106,7 +1115,7 @@ def template(pattern, template):
     chunks = 1 + (n - 1)
     for i in range((n - 1) // 2):
         try:
-            index = _operator.index(template[2 * i + 1])
+            index = _index(template[2 * i + 1])
         except TypeError:
             raise TypeError("an integer is required") from None
         if index < 0:
@@ -1260,7 +1269,7 @@ class Pattern(metaclass=_Immutable):
         return result
 
     def _subx(self, repl, string, count, subn):
-        count = _operator.index(count)
+        count = _index(count)
         if callable(repl):
             filter_ = repl
             literal_filter = False
@@ -1494,7 +1503,7 @@ Match objects always have a boolean value of True."""
     def _getindex(self, index):
         if isinstance(index, int) or hasattr(index, "__index__"):
             try:
-                i = _operator.index(index)
+                i = _index(index)
             except TypeError:
                 i = -1
         else:
@@ -1632,10 +1641,10 @@ def compile(pattern, flags, code, groups, groupindex, indexgroup):
     if not isinstance(indexgroup, tuple):
         raise TypeError("compile() argument 'indexgroup' must be tuple, not %s"
                         % type(indexgroup).__name__)
-    flags = _operator.index(flags)
-    groups = _operator.index(groups)
+    flags = _index(flags)
+    groups = _index(groups)
     for value in code:
-        value = _operator.index(value)
+        value = _index(value)
         if value < 0:
             raise OverflowError("can't convert negative value to unsigned int")
         if value > 0xFFFFFFFF:
