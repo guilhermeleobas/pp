@@ -21,6 +21,12 @@ FRAME_OWNED_BY_FRAME_OBJECT = 2
 FRAME_OWNED_BY_INTERPRETER = 3
 
 _names_cache: dict = {}  # id(code) -> (code, localsplusnames, first_free)
+_CACHE_LIMIT = 4096      # both code caches hold their code strongly: bound them
+
+
+def _trim(cache: dict) -> None:
+    if len(cache) > _CACHE_LIMIT:
+        del cache[next(iter(cache))]       # the oldest entry
 
 
 def localsplus_names(code: types.CodeType) -> tuple:
@@ -33,6 +39,7 @@ def localsplus_names(code: types.CodeType) -> tuple:
     names = varnames + cells + code.co_freevars
     first_free = len(varnames) + len(cells)
     _names_cache[id(code)] = (code, names, first_free)
+    _trim(_names_cache)
     return names, first_free
 
 
@@ -43,6 +50,7 @@ def _make_code_info(code: types.CodeType) -> tuple:
     names, first_free = localsplus_names(code)
     info = (code, decode(code), names, first_free)
     _code_info[id(code)] = info
+    _trim(_code_info)
     return info
 
 
