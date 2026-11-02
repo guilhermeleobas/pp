@@ -54,6 +54,21 @@ def _PyNumber_Index(item):
     return result
 
 
+_PY_SSIZE_T_MAX = (1 << 63) - 1
+_PY_SSIZE_T_MIN = -(1 << 63)
+
+
+def _PyNumber_AsSsize_t(item, err_cls):
+    """`PyNumber_AsSsize_t`: an index as a Py_ssize_t; out-of-range values raise
+    `err_cls` (or are clamped when it is None)."""
+    value = _PyNumber_Index(item)
+    if _PY_SSIZE_T_MIN <= value <= _PY_SSIZE_T_MAX:
+        return value
+    if err_cls is None:
+        return _PY_SSIZE_T_MAX if value > 0 else _PY_SSIZE_T_MIN
+    raise err_cls(f"cannot fit '{Py_TYPE(item).tp_name}' into an index-sized integer")
+
+
 # --- numbers --------------------------------------------------------------------
 
 def binary_op1(v, w, op_slot):
@@ -160,7 +175,8 @@ def PyNumber_Add(v, w):
 def sequence_repeat(repeatfunc, seq, n):
     if not _PyIndex_Check(n):
         raise _type_error("can't multiply sequence by non-int of type '%.200s'", n)
-    return repeatfunc(seq, n)
+    count = _PyNumber_AsSsize_t(n, OverflowError)
+    return repeatfunc(seq, count)
 
 
 def PyNumber_Multiply(v, w):
@@ -222,11 +238,12 @@ def PyNumber_InPlaceAdd(v, w):
     result = binary_iop1(v, w, "nb_inplace_add", "nb_add")
     if result is NotImplemented:
         m = Py_TYPE(v)
-        func = m.sq_inplace_concat
-        if func is None:
-            func = m.sq_concat
-        if func is not None:
-            return func(v, w)
+        if m.tp_has_sequence:
+            func = m.sq_inplace_concat
+            if func is None:
+                func = m.sq_concat
+            if func is not None:
+                return func(v, w)
         raise binop_type_error(v, w, "+=")
     return result
 
@@ -236,14 +253,16 @@ def PyNumber_InPlaceMultiply(v, w):
     if result is NotImplemented:
         mv = Py_TYPE(v)
         mw = Py_TYPE(w)
-        f = mv.sq_inplace_repeat
-        if f is None:
-            f = mv.sq_repeat
-        if f is not None:
-            return sequence_repeat(f, v, w)
-        if mw.sq_repeat is not None:
+        if mv.tp_has_sequence:
+            f = mv.sq_inplace_repeat
+            if f is None:
+                f = mv.sq_repeat
+            if f is not None:
+                return sequence_repeat(f, v, w)
+        elif mw.tp_has_sequence:
             # The right hand operand is not mutated: sq_inplace_repeat is not used.
-            return sequence_repeat(mw.sq_repeat, w, v)
+            if mw.sq_repeat is not None:
+                return sequence_repeat(mw.sq_repeat, w, v)
         raise binop_type_error(v, w, "*=")
     return result
 
@@ -289,9 +308,14 @@ def PyObject_Size(o):
 
 
 def PyObject_GetItem(o, key):
-    f = Py_TYPE(o).mp_subscript
+    view = Py_TYPE(o)
+    f = view.mp_subscript
     if f is not None:
         return f(o, key)
+    if view.sq_item is not None:
+        if _PyIndex_Check(key):
+            return PySequence_GetItem(o, _PyNumber_AsSsize_t(key, IndexError))
+        raise _type_error("sequence index must be integer, not '%.200s'", key)
     if PyType_Check(o):
         # Special case type[int], but disallow other types so str[int] fails
         if o is type:
@@ -304,20 +328,18 @@ def PyObject_GetItem(o, key):
 
 
 def PyObject_SetItem(o, key, value) -> None:
-    f = Py_TYPE(o).mp_ass_subscript
+    view = Py_TYPE(o)
+    f = view.mp_ass_subscript
     if f is not None:
         f(o, key, value)
         return
+    if view.tp_has_sequence:
+        if _PyIndex_Check(key):
+            PySequence_SetItem(o, _PyNumber_AsSsize_t(key, IndexError), value)
+            return
+        elif view.sq_ass_item is not None:
+            raise _type_error("sequence index must be integer, not '%.200s'", key)
     raise _type_error("'%.200s' object does not support item assignment", o)
-
-
-def _has_tp_as_sequence(view) -> bool:
-    """Whether `tp_as_sequence` is non-NULL: heap types always have one."""
-    if view.tp_flags & Py_TPFLAGS_HEAPTYPE:
-        return True
-    return (view.sq_length is not None or view.sq_item is not None
-            or view.sq_contains is not None or view.sq_concat is not None
-            or view.sq_repeat is not None)
 
 
 def PyObject_DelItem(o, key) -> None:
@@ -326,10 +348,57 @@ def PyObject_DelItem(o, key) -> None:
     if f is not None:
         f(o, key, NULL)
         return
-    if _has_tp_as_sequence(view) and _PyIndex_Check(key):
-        # PySequence_DelItem: there is no sq_ass_item without mp_ass_subscript.
-        raise _type_error("'%.200s' object doesn't support item deletion", o)
+    if view.tp_has_sequence:
+        if _PyIndex_Check(key):
+            PySequence_DelItem(o, _PyNumber_AsSsize_t(key, IndexError))
+            return
+        elif view.sq_ass_item is not None:
+            raise _type_error("sequence index must be integer, not '%.200s'", key)
     raise _type_error("'%.200s' object does not support item deletion", o)
+
+
+def PySequence_GetItem(s, i):
+    view = Py_TYPE(s)
+    f = view.sq_item
+    if f is not None:
+        if i < 0:
+            length = view.sq_length
+            if length is not None:
+                i += length(s)
+        return f(s, i)
+    if view.mp_subscript is not None:
+        raise _type_error("%.200s is not a sequence", s)
+    raise _type_error("'%.200s' object does not support indexing", s)
+
+
+def PySequence_SetItem(s, i, o) -> None:
+    view = Py_TYPE(s)
+    f = view.sq_ass_item
+    if f is not None:
+        if i < 0:
+            length = view.sq_length
+            if length is not None:
+                i += length(s)
+        f(s, i, o)
+        return
+    if view.mp_ass_subscript is not None:
+        raise _type_error("%.200s is not a sequence", s)
+    raise _type_error("'%.200s' object does not support item assignment", s)
+
+
+def PySequence_DelItem(s, i) -> None:
+    view = Py_TYPE(s)
+    f = view.sq_ass_item
+    if f is not None:
+        if i < 0:
+            length = view.sq_length
+            if length is not None:
+                i += length(s)
+        f(s, i, NULL)
+        return
+    if view.mp_ass_subscript is not None:
+        raise _type_error("%.200s is not a sequence", s)
+    raise _type_error("'%.200s' object doesn't support item deletion", s)
 
 
 def PySequence_Check(s) -> bool:
@@ -351,7 +420,7 @@ def _PySequence_IterSearch(seq, obj, operation):
     try:
         it = PyObject_GetIter(seq)
     except TypeError as e:
-        err = e
+        err = True    # not the exception itself: it would form a cycle with its traceback
     if err is not None:
         _PyErr_Clear(_PyThreadState_GET())
         raise _type_error("argument of type '%.200s' is not a container or iterable", seq)
@@ -414,7 +483,7 @@ def PyIter_Next(iterator):
     try:
         return f(iterator)
     except StopIteration as e:
-        stop = e
+        stop = True    # not the exception itself: it would form a cycle with its traceback
     _PyErr_Clear(_PyThreadState_GET())
     return NULL
 
@@ -436,11 +505,10 @@ def PyIter_Send(iterator, arg):
         else:
             result = _call.PyObject_CallOneArg(PyObject_GetAttr(iterator, "send"), arg)
     except StopIteration as e:
-        stop = e
-    if stop is not None:
-        # _PyGen_FetchStopIterationValue
-        _PyErr_Clear(_PyThreadState_GET())
-        return PYGEN_RETURN, stop.value
+        stop = e.value
+        result = NULL
+        _PyErr_Clear(_PyThreadState_GET())     # _PyGen_FetchStopIterationValue
+        return PYGEN_RETURN, stop
     return PYGEN_NEXT, result
 
 
@@ -472,7 +540,7 @@ def seqiter_next(it):
     try:
         result = Py_TYPE(seq).sq_item(seq, it.it_index)
     except (IndexError, StopIteration) as e:
-        err = e
+        err = True    # not the exception itself: it would form a cycle with its traceback
     if err is not None:
         _PyErr_Clear(_PyThreadState_GET())
         it.it_seq = None

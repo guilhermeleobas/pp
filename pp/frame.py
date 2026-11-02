@@ -21,6 +21,12 @@ FRAME_OWNED_BY_FRAME_OBJECT = 2
 FRAME_OWNED_BY_INTERPRETER = 3
 
 _names_cache: dict = {}  # id(code) -> (code, localsplusnames, first_free)
+_CACHE_LIMIT = 4096      # both code caches hold their code strongly: bound them
+
+
+def _trim(cache: dict) -> None:
+    if len(cache) > _CACHE_LIMIT:
+        del cache[next(iter(cache))]       # the oldest entry
 
 
 def localsplus_names(code: types.CodeType) -> tuple:
@@ -33,7 +39,19 @@ def localsplus_names(code: types.CodeType) -> tuple:
     names = varnames + cells + code.co_freevars
     first_free = len(varnames) + len(cells)
     _names_cache[id(code)] = (code, names, first_free)
+    _trim(_names_cache)
     return names, first_free
+
+
+_code_info: dict = {}  # id(code) -> (code, DecodedCode, localsplusnames, first_free)
+
+
+def _make_code_info(code: types.CodeType) -> tuple:
+    names, first_free = localsplus_names(code)
+    info = (code, decode(code), names, first_free)
+    _code_info[id(code)] = info
+    _trim(_code_info)
+    return info
 
 
 def _alias(name: str) -> property:
@@ -62,16 +80,23 @@ class Frame:
     def stackpointer(self) -> int:
         return len(self.stack)
 
+    __slots__ = ("code", "decoded", "globals", "builtins", "locals", "localsplusnames",
+                 "first_free", "localsplus", "stack", "instr_offset", "lasti", "previous",
+                 "func", "owner", "frame_obj", "return_value", "yielded", "yield_oparg",
+                 "__weakref__")
+
     def __init__(self, code: types.CodeType, globals: dict, builtins: dict,
                  locals, previous: "Frame | None" = None, func=None):
+        info = _code_info.get(id(code))
+        if info is None or info[0] is not code:
+            info = _make_code_info(code)
         self.code = code
-        self.decoded: DecodedCode = decode(code)
+        self.decoded = info[1]
         self.globals = globals
         self.builtins = builtins
         self.locals = locals
-        names, first_free = localsplus_names(code)
-        self.localsplusnames = names
-        self.first_free = first_free
+        names = self.localsplusnames = info[2]
+        self.first_free = info[3]
         self.localsplus = [NULL] * len(names)
         self.stack: list = []
         self.instr_offset = 0

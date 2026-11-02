@@ -7,6 +7,8 @@ import types
 import opcode as _opcode
 
 from pp import call as _call
+from pp import errors as _errors
+from pp import typeobject as _typeobject
 from pp import object as _obj
 from pp.abstract import (PYGEN_RETURN, PyIter_Next, PyIter_Send, PyNumber_Add, PyNumber_And, PyNumber_FloorDivide,
                          PyNumber_InPlaceAdd, PyNumber_InPlaceAnd, PyNumber_InPlaceFloorDivide,
@@ -35,6 +37,26 @@ from pp.errors import (PyErr_GivenExceptionMatches, PyExceptionClass_Check, PyTh
 from pp.frame import NULL, Frame  # noqa: F401  (NULL is part of the pp.vm API)
 from pp.funcobject import Function, PyFunction_New, bind_arguments, builtins_from_globals
 from pp.genobject import PyAsyncGenObject, PyCoroObject, PyGenObject
+
+_GenericGetAttr = _obj.PyObject_GenericGetAttr
+_GenericSetAttr = _obj.PyObject_GenericSetAttr
+_object_getattribute = _typeobject._object_getattribute
+DICT_STD = _typeobject.DICT_STD
+DICT_NONE = _typeobject.DICT_NONE
+_ITER_TYPES = frozenset((list, tuple, dict, set, frozenset, str, bytes, range))
+_NB_SUBSCR = [n for n, _ in _opcode._nb_ops].index("NB_SUBSCR")
+_SUBSCRIPT_TYPES = frozenset((list, tuple, dict, str))
+_CONTAINS_TYPES = frozenset((dict, set, frozenset))
+_MethodDescriptorType = types.MethodDescriptorType
+_BuiltinFunction = types.BuiltinFunctionType
+_MethodType = types.MethodType
+_views_get = _typeobject._views_get
+
+_next = next
+_FAST_ITERATORS = frozenset((type(iter([])), type(iter(())), type(iter(range(1))), type(iter("")),
+                             type(iter({})), type(iter({}.values())), type(iter({}.items())),
+                             type(iter(set())), type(iter(b"")), enumerate, zip, reversed,
+                             type(reversed([])), map, filter, type(iter(range(1 << 70)))))
 
 _EXIT = object()  # returned by a handler to leave the eval loop
 
@@ -84,6 +106,55 @@ _NB_FUNCS = {
     "NB_SUBSCR": PyObject_GetItem,
 }
 BINARY_OPS = tuple(_NB_FUNCS[name] for name, _ in _opcode._nb_ops)
+
+# Specialized BINARY_OP / COMPARE_OP / TO_BOOL (BINARY_OP_ADD_INT, COMPARE_OP_INT,
+# TO_BOOL_LIST, ...): for exact builtin operand types the slot functions are the
+# C implementations of the very same operations, so call them directly.
+# (Lib/operator.py's pure-Python definitions.)
+class _operator:
+    add = staticmethod(lambda a, b: a + b)
+    and_ = staticmethod(lambda a, b: a & b)
+    floordiv = staticmethod(lambda a, b: a // b)
+    lshift = staticmethod(lambda a, b: a << b)
+    mul = staticmethod(lambda a, b: a * b)
+    mod = staticmethod(lambda a, b: a % b)
+    or_ = staticmethod(lambda a, b: a | b)
+    pow = staticmethod(lambda a, b: a ** b)
+    rshift = staticmethod(lambda a, b: a >> b)
+    sub = staticmethod(lambda a, b: a - b)
+    truediv = staticmethod(lambda a, b: a / b)
+    xor = staticmethod(lambda a, b: a ^ b)
+    lt = staticmethod(lambda a, b: a < b)
+    le = staticmethod(lambda a, b: a <= b)
+    eq = staticmethod(lambda a, b: a == b)
+    ne = staticmethod(lambda a, b: a != b)
+    gt = staticmethod(lambda a, b: a > b)
+    ge = staticmethod(lambda a, b: a >= b)
+
+
+_OPERATOR_FOR_NB = {
+    "NB_ADD": _operator.add, "NB_AND": _operator.and_, "NB_FLOOR_DIVIDE": _operator.floordiv,
+    "NB_LSHIFT": _operator.lshift, "NB_MULTIPLY": _operator.mul,
+    "NB_REMAINDER": _operator.mod, "NB_OR": _operator.or_, "NB_POWER": _operator.pow,
+    "NB_RSHIFT": _operator.rshift, "NB_SUBTRACT": _operator.sub,
+    "NB_TRUE_DIVIDE": _operator.truediv, "NB_XOR": _operator.xor,
+    "NB_INPLACE_ADD": _operator.add, "NB_INPLACE_AND": _operator.and_,
+    "NB_INPLACE_FLOOR_DIVIDE": _operator.floordiv, "NB_INPLACE_LSHIFT": _operator.lshift,
+    "NB_INPLACE_MULTIPLY": _operator.mul, "NB_INPLACE_REMAINDER": _operator.mod,
+    "NB_INPLACE_OR": _operator.or_, "NB_INPLACE_POWER": _operator.pow,
+    "NB_INPLACE_RSHIFT": _operator.rshift, "NB_INPLACE_SUBTRACT": _operator.sub,
+    "NB_INPLACE_TRUE_DIVIDE": _operator.truediv, "NB_INPLACE_XOR": _operator.xor,
+}
+_NUMBER_BINOPS = tuple(_OPERATOR_FOR_NB.get(name) for name, _ in _opcode._nb_ops)
+_ADD_ONLY = tuple(_operator.add if name == "NB_ADD" else None
+                  for name, _ in _opcode._nb_ops)
+_ADD_IMMUTABLE = tuple(_operator.add if name in ("NB_ADD", "NB_INPLACE_ADD") else None
+                       for name, _ in _opcode._nb_ops)    # str, tuple: += is +
+_NUMBER_TYPES = frozenset((int, float))
+_COMPARE_FUNCS = (_operator.lt, _operator.le, _operator.eq, _operator.ne, _operator.gt,
+                  _operator.ge)
+_COMPARE_TYPES = frozenset((int, float, str))
+_TRUTH_TYPES = frozenset((int, float, str, bytes, list, tuple, dict, set, frozenset))
 
 # CONVERT_VALUE: FVC_STR=1, FVC_REPR=2, FVC_ASCII=3
 CONVERSIONS = (None, str, repr, ascii)
@@ -157,7 +228,7 @@ def _PyMapping_GetOptionalItem(mapping, key):
     try:
         res = PyObject_GetItem(mapping, key)
     except KeyError as e:
-        err = e
+        err = True    # not the exception itself: it would form a cycle with its traceback
     if err is not None:
         _PyErr_Clear(_PyThreadState_GET())
         return _MISSING
@@ -206,7 +277,7 @@ def _unpack(seq, before: int, after: int | None) -> list:
     try:
         it = PyObject_GetIter(seq)
     except TypeError as e:
-        err = e
+        err = True    # not the exception itself: it would form a cycle with its traceback
     if err is not None:
         # Re-raise unless the object is simply not iterable.
         _PyErr_Clear(_PyThreadState_GET())
@@ -414,6 +485,7 @@ class VirtualMachine:
         self.frame: Frame | None = None
         self.tstate = PyThreadState()
         self.tstate.eval_frame = self.run_frame
+        self.tstate.vm = self
         self.path: list = list(path or [])
         self.modules: dict = {}
         self.builtins_module = make_builtins(self)
@@ -485,7 +557,12 @@ class VirtualMachine:
         code = func.__code__
         locals = None if code.co_flags & CO_OPTIMIZED else func.__globals__
         frame = Frame(code, func.__globals__, func.__builtins__, locals, func=func)
-        bind_arguments(func, frame.localsplus, frame.localsplusnames, args, kwargs)
+        nargs = len(args)
+        if (nargs == code.co_argcount and not kwargs and not code.co_flags & 0xC
+                and not code.co_kwonlyargcount):
+            frame.localsplus[:nargs] = args          # the plain positional case
+        else:
+            bind_arguments(func, frame.localsplus, frame.localsplusnames, args, kwargs)
         return self.run_frame(frame)
 
     def call(self, callable, args, kwargs=None):
@@ -494,7 +571,9 @@ class VirtualMachine:
     def run_frame(self, frame: Frame, throw: BaseException | None = None) -> object:
         """Execute `frame` until it returns or yields; `throw` resumes it with an exception."""
         tstate = self.tstate
-        prev_tstate = _PyThreadState_Swap(tstate)
+        prev_tstate = _errors._current_tstate
+        if prev_tstate is not tstate:
+            _PyThreadState_Swap(tstate)
         frame.previous = self.frame
         self.frame = frame
         decoded = frame.decoded
@@ -540,7 +619,8 @@ class VirtualMachine:
                 exc = None
         finally:
             self.frame = frame.previous
-            _PyThreadState_Swap(prev_tstate)
+            if prev_tstate is not tstate:
+                _PyThreadState_Swap(prev_tstate)
 
     # --- no-ops ---
 
@@ -593,7 +673,7 @@ class VirtualMachine:
         try:
             PyObject_DelItem(ns, name)
         except KeyError as e:
-            err = e
+            err = True    # not the exception itself: it would form a cycle with its traceback
         if err is not None:
             _PyErr_Clear(_PyThreadState_GET())
             raise _name_error(name)
@@ -607,7 +687,13 @@ class VirtualMachine:
         return v
 
     def LOAD_GLOBAL(self, f, i):
-        f.stack.append(self._load_global(f, f.code.co_names[i.arg >> 1]))
+        name = f.code.co_names[i.arg >> 1]
+        v = _dict_get(f.globals, name, _MISSING)
+        if v is _MISSING:
+            v = _dict_get(f.builtins, name, _MISSING)
+            if v is _MISSING:
+                raise _name_error(name)
+        f.stack.append(v)
         if i.arg & 1:
             f.stack.append(NULL)
 
@@ -775,12 +861,38 @@ class VirtualMachine:
         f.stack.append(func)
 
     def _call(self, f, nargs, kwnames):
-        args = f.popn(nargs)
-        self_or_null = f.stack.pop()
-        callable = f.stack.pop()
+        stack = f.stack
+        if nargs:
+            args = stack[-nargs:]
+            del stack[-nargs:]
+        else:
+            args = []
+        self_or_null = stack.pop()
+        callable = stack.pop()
         if self_or_null is not NULL:
             args.insert(0, self_or_null)
-        f.stack.append(_call.PyObject_Vectorcall(callable, args, kwnames))
+        if not kwnames:
+            tc = type(callable)
+            if tc is Function:
+                # _PyFunction_Vectorcall
+                stack.append(callable._vm.call_function(callable, args, None))
+                return
+            if tc is _MethodType:
+                # _PyObject_Vectorcall of a bound method: prepend self
+                func = callable.__func__
+                if type(func) is Function:
+                    args.insert(0, callable.__self__)
+                    stack.append(func._vm.call_function(func, args, None))
+                    return
+            elif tc is _MethodDescriptorType:
+                # CALL_METHOD_DESCRIPTOR_*: method_vectorcall of a host C method
+                stack.append(callable(*args))
+                return
+            elif tc is _BuiltinFunction and len(args) != 4:
+                # CALL_BUILTIN_FAST: cfunction_call minus the type.__new__ special case
+                stack.append(callable(*args))
+                return
+        stack.append(_call.PyObject_Vectorcall(callable, args, kwnames))
 
     def CALL(self, f, i):
         self._call(f, i.arg, ())
@@ -973,7 +1085,7 @@ class VirtualMachine:
             tp = type(owner)
             msg = _SPECIAL_ERRORS[name].format(_type_fullname(tp))
             other, suggestion = _SPECIAL_SUGGEST[name]
-            if _PyType_Lookup(Py_TYPE(owner), other) is not NULL:
+            if _PyType_Lookup(type(owner), other) is not NULL:
                 msg += suggestion
             raise TypeError(msg)
         method, self_or_null = found
@@ -983,9 +1095,27 @@ class VirtualMachine:
     # --- operators ---
 
     def BINARY_OP(self, f, i):
-        rhs = f.stack.pop()
-        lhs = f.stack.pop()
-        f.stack.append(BINARY_OPS[i.arg](lhs, rhs))
+        stack = f.stack
+        rhs = stack.pop()
+        lhs = stack.pop()
+        tl = type(lhs)
+        tr = type(rhs)
+        if tl in _NUMBER_TYPES and tr in _NUMBER_TYPES:
+            fn = _NUMBER_BINOPS[i.arg]
+            if fn is not None:
+                stack.append(fn(lhs, rhs))
+                return
+        elif tl is tr and (tl is str or tl is list or tl is tuple):
+            fn = (_ADD_ONLY if tl is list else _ADD_IMMUTABLE)[i.arg]
+            if fn is not None:
+                stack.append(fn(lhs, rhs))
+                return
+        if tl in _SUBSCRIPT_TYPES and i.arg == _NB_SUBSCR:
+            # BINARY_OP_SUBSCR_LIST_INT / _TUPLE_INT / _DICT / _STR_INT & co: the
+            # exact builtin container's own mp_subscript.
+            stack.append(lhs[rhs])
+            return
+        stack.append(BINARY_OPS[i.arg](lhs, rhs))
 
     def BINARY_SLICE(self, f, i):
         stop = f.stack.pop()
@@ -1004,6 +1134,9 @@ class VirtualMachine:
         sub = f.stack.pop()
         container = f.stack.pop()
         v = f.stack.pop()
+        if type(container) is dict or type(container) is list:
+            container[sub] = v          # STORE_SUBSCR_DICT / _LIST_INT
+            return
         PyObject_SetItem(container, sub, v)
 
     def DELETE_SUBSCR(self, f, i):
@@ -1021,15 +1154,30 @@ class VirtualMachine:
         f.stack.append(f.stack.pop() is False)  # TO_BOOL always precedes
 
     def TO_BOOL(self, f, i):
-        f.stack.append(PyObject_IsTrue(f.stack.pop()))
+        stack = f.stack
+        v = stack.pop()
+        if v is True or v is False:
+            stack.append(v)
+        elif v is None:
+            stack.append(False)
+        elif type(v) in _TRUTH_TYPES:
+            stack.append(bool(v))
+        else:
+            stack.append(PyObject_IsTrue(v))
 
     def COMPARE_OP(self, f, i):
-        right = f.stack.pop()
-        left = f.stack.pop()
+        stack = f.stack
+        right = stack.pop()
+        left = stack.pop()
+        tl = type(left)
+        tr = type(right)
+        if tl in _COMPARE_TYPES and (tl is tr or (tl is not str and tr is not str and tr in _COMPARE_TYPES)):
+            stack.append(_COMPARE_FUNCS[i.arg >> 5](left, right))
+            return
         res = PyObject_RichCompare(left, right, i.arg >> 5)
         if i.arg & 16:
             res = PyObject_IsTrue(res)
-        f.stack.append(res)
+        stack.append(res)
 
     def IS_OP(self, f, i):
         right = f.stack.pop()
@@ -1039,6 +1187,10 @@ class VirtualMachine:
     def CONTAINS_OP(self, f, i):
         right = f.stack.pop()
         left = f.stack.pop()
+        if type(right) in _CONTAINS_TYPES:
+            # CONTAINS_OP_DICT / _SET: the exact builtin's own sq_contains.
+            f.stack.append((left in right) ^ bool(i.arg))
+            return
         f.stack.append(PySequence_Contains(right, left) ^ bool(i.arg))
 
     # --- control flow ---
@@ -1071,23 +1223,28 @@ class VirtualMachine:
     # --- iteration ---
 
     def GET_ITER(self, f, i):
-        f.stack.append(PyObject_GetIter(f.stack.pop()))
+        v = f.stack.pop()
+        f.stack.append(iter(v) if type(v) in _ITER_TYPES else PyObject_GetIter(v))
         f.stack.append(NULL)  # index_or_null: always NULL in pp
 
-    def FOR_ITER(self, f, i):
-        it = f.stack[-2]
-        stop = False
-        v = NULL
-        try:
-            v = Py_TYPE(it).tp_iternext(it)
-        except StopIteration:
-            stop = True
-        if stop:
-            # Exhausted: jump past the END_FOR at the target, leaving iter/null for POP_ITER.
-            _PyErr_Clear(self.tstate)
-            f.instr_offset = i.jump_target + 2
-            return
-        f.stack.append(v)
+    def FOR_ITER(self, f, i, _fast=_FAST_ITERATORS, _next=_next, _MISSING=_MISSING, _type=type):
+        stack = f.stack
+        it = stack[-2]
+        if _type(it) in _fast:
+            # FOR_ITER_LIST / _TUPLE / _RANGE & co: the C tp_iternext of an exact
+            # builtin iterator, without the exception for the exhausted case.
+            v = _next(it, _MISSING)
+            if v is not _MISSING:
+                stack.append(v)
+                return
+        else:
+            try:
+                stack.append(Py_TYPE(it).tp_iternext(it))
+                return
+            except StopIteration:
+                _PyErr_Clear(self.tstate)
+        # Exhausted: jump past the END_FOR at the target, leaving iter/null for POP_ITER.
+        f.instr_offset = i.jump_target + 2
 
     def END_FOR(self, f, i):
         f.stack.pop()
@@ -1200,16 +1357,49 @@ class VirtualMachine:
         name = f.code.co_names[i.arg >> 1]
         if i.arg & 1:
             # Method form: (unbound method, self) if the attribute is a method, else (attr, NULL).
+            view = _views_get(id(type(owner))) or Py_TYPE(owner)
+            if view.tp_getattro is _GenericGetAttr:
+                # _PyObject_GetMethod for the common case: a plain function or a C
+                # method descriptor in the type, not shadowed by the instance dict.
+                descr = _PyType_Lookup(type(owner), name)
+                if type(descr) is Function or type(descr) is _MethodDescriptorType:
+                    kind = view.tp_dictkind
+                    if kind == DICT_NONE or (kind == DICT_STD and name not in owner.__dict__):
+                        f.stack.append(descr)
+                        f.stack.append(owner)
+                        return
             attr, meth_found = _PyObject_GetMethod(owner, name)
             f.stack.append(attr)
             f.stack.append(owner if meth_found else NULL)
         else:
-            f.stack.append(PyObject_GetAttr(owner, name))
+            view = _views_get(id(type(owner))) or Py_TYPE(owner)
+            if view.tp_getattro is _GenericGetAttr:
+                # PyObject_GetAttr -> tp_getattro, minus the error-context wrapper
+                # (the generic getattr sets name/obj itself).
+                if view.tp_dictkind == DICT_STD:
+                    # An instance attribute of a plain object: nothing in the type
+                    # (not even a non-data descriptor) shadows it.
+                    if _PyType_Lookup(type(owner), name) is NULL:
+                        res = owner.__dict__.get(name, NULL)
+                        if res is not NULL:
+                            f.stack.append(res)
+                            return
+                f.stack.append(_GenericGetAttr(owner, name))
+            else:
+                f.stack.append(PyObject_GetAttr(owner, name))
 
     def STORE_ATTR(self, f, i):
         owner = f.stack.pop()
         v = f.stack.pop()
-        PyObject_SetAttr(owner, f.code.co_names[i.arg], v)
+        name = f.code.co_names[i.arg]
+        view = _views_get(id(type(owner))) or Py_TYPE(owner)
+        if view.tp_setattro is _GenericSetAttr and view.tp_getattro is _GenericGetAttr \
+                and view.tp_dictkind == DICT_STD:
+            # PyObject_GenericSetAttr for a plain instance: no descriptor in the way.
+            if _PyType_Lookup(type(owner), name) is NULL:
+                _dict_setitem(owner.__dict__, name, v)
+                return
+        PyObject_SetAttr(owner, name, v)
 
     def DELETE_ATTR(self, f, i):
         PyObject_SetAttr(f.stack.pop(), f.code.co_names[i.arg], NULL)
@@ -1234,8 +1424,8 @@ class VirtualMachine:
         if global_super is super_type and PyType_Check(cls):
             # The specialized LOAD_SUPER_ATTR_ATTR / _METHOD: _PySuper_Lookup.
             attr, method = _PySuper_Lookup(
-        cls, self_, name, super_type,
-        (i.arg & 1) and Py_TYPE(self_).tp_getattro is _obj.PyObject_GenericGetAttr)
+                cls, self_, name, super_type,
+                (i.arg & 1) and Py_TYPE(self_).tp_getattro is _obj.PyObject_GenericGetAttr)
         else:
             sup = _call.PyObject_Vectorcall(global_super, (cls, self_) if i.arg & 2 else ())
             attr = PyObject_GetAttr(sup, name)

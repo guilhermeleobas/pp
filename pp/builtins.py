@@ -28,6 +28,28 @@ def _calculate_meta(meta, bases):
     return winner
 
 
+class _BuiltinFunction:
+    """A builtin implemented in Python, shaped like builtin_function_or_method:
+    callable, but not a descriptor."""
+    def __init__(self, func):
+        self._func = func
+        self.__name__ = self.__qualname__ = func.__name__
+        self.__module__ = "builtins"
+
+    def __call__(self, *args, **kwargs):
+        return self._func(*args, **kwargs)
+
+    def __repr__(self):
+        return f"<built-in function {self.__name__}>"
+
+    def __reduce__(self):
+        return self._func.__name__      # pickled by name, as builtin functions are
+
+
+_BuiltinFunction.__name__ = _BuiltinFunction.__qualname__ = "builtin_function_or_method"
+_BuiltinFunction.__module__ = "builtins"
+
+
 def make_builtins(vm) -> types.ModuleType:
     """Build the VM's `builtins` module; its __dict__ is the frames' builtins."""
     mod = types.ModuleType("builtins")
@@ -195,10 +217,12 @@ def make_builtins(vm) -> types.ModuleType:
             file = vm.sys_module.stdout
         return _host_builtins.print(*args, sep=sep, end=end, file=file, flush=flush)
 
-    for f in (__build_class__, globals, locals, vars, dir, exec, eval, __import__, print,
-              setattr, delattr):
+    for f in (__build_class__, globals, locals, vars, dir, exec, eval, __import__, print):
         f.__module__ = "builtins"
         f.__qualname__ = f.__name__
         ns[f.__name__] = f
+    # Host builtins do not bind as methods (`class T: f = delattr`); these must not either.
+    ns["setattr"] = _BuiltinFunction(setattr)
+    ns["delattr"] = _BuiltinFunction(delattr)
     ns["super"] = super
     return mod

@@ -19,6 +19,7 @@ functions raise. "Missing" is the `NULL` sentinel.
 """
 
 import types
+from weakref import getweakrefcount as _getweakrefcount, ref as _ref
 
 from pp.errors import _PyErr_Clear, _PyThreadState_GET
 from pp.frame import NULL
@@ -27,6 +28,7 @@ from pp.frame import NULL
 _call = None
 _object = None
 
+Py_TPFLAGS_IMMUTABLETYPE = 1 << 8
 Py_TPFLAGS_HEAPTYPE = 1 << 9
 Py_TPFLAGS_METHOD_DESCRIPTOR = 1 << 17
 
@@ -45,8 +47,10 @@ _MemberDescr = types.MemberDescriptorType
 
 # --- slot table ---------------------------------------------------------------
 
-# name, dunder, generic function (filled below), kind ("sq"/"nb" for dunders that
-# serve both protocols: only a C wrapper of that protocol may fill the slot).
+# field, dunder, generic function (filled below), wrapper token. The token is the
+# `wrapper` member of CPython's slotdef: it tells apart the slots that share a
+# dunder (a wrapper_descriptor only stands for a slot whose wrapper matches).
+# Entries of one dunder are listed in slotdefs order: number, mapping, sequence.
 _SLOTDEF_SPECS = (
     ("tp_getattro", "__getattribute__", "slot_tp_getattr_hook", None),
     ("tp_getattro", "__getattr__", "slot_tp_getattr_hook", None),
@@ -64,24 +68,12 @@ _SLOTDEF_SPECS = (
     ("tp_descr_get", "__get__", "slot_tp_descr_get", None),
     ("tp_descr_set", "__set__", "slot_tp_descr_set", None),
     ("tp_descr_set", "__delete__", "slot_tp_descr_set", None),
-    ("sq_length", "__len__", "slot_sq_length", None),
-    ("mp_length", "__len__", "slot_sq_length", None),
-    ("sq_concat", "__add__", None, "sq"),
-    ("sq_repeat", "__mul__", None, "sq"),
-    ("sq_repeat", "__rmul__", None, "sq"),
-    ("sq_item", "__getitem__", "slot_sq_item", None),
-    ("sq_contains", "__contains__", "slot_sq_contains", None),
-    ("sq_inplace_concat", "__iadd__", None, "sq"),
-    ("sq_inplace_repeat", "__imul__", None, "sq"),
-    ("mp_subscript", "__getitem__", "slot_mp_subscript", None),
-    ("mp_ass_subscript", "__setitem__", "slot_mp_ass_subscript", None),
-    ("mp_ass_subscript", "__delitem__", "slot_mp_ass_subscript", None),
-    ("nb_add", "__add__", "slot_nb_add", "nb"),
-    ("nb_add", "__radd__", "slot_nb_add", "nb"),
+    ("nb_add", "__add__", "slot_nb_add", "binaryfunc_l"),
+    ("nb_add", "__radd__", "slot_nb_add", None),
     ("nb_subtract", "__sub__", "slot_nb_subtract", None),
     ("nb_subtract", "__rsub__", "slot_nb_subtract", None),
-    ("nb_multiply", "__mul__", "slot_nb_multiply", "nb"),
-    ("nb_multiply", "__rmul__", "slot_nb_multiply", "nb"),
+    ("nb_multiply", "__mul__", "slot_nb_multiply", "binaryfunc_l"),
+    ("nb_multiply", "__rmul__", "slot_nb_multiply", "binaryfunc_r"),
     ("nb_remainder", "__mod__", "slot_nb_remainder", None),
     ("nb_remainder", "__rmod__", "slot_nb_remainder", None),
     ("nb_power", "__pow__", "slot_nb_power", None),
@@ -101,9 +93,9 @@ _SLOTDEF_SPECS = (
     ("nb_or", "__or__", "slot_nb_or", None),
     ("nb_or", "__ror__", "slot_nb_or", None),
     ("nb_index", "__index__", "slot_nb_index", None),
-    ("nb_inplace_add", "__iadd__", "slot_nb_inplace_add", "nb"),
+    ("nb_inplace_add", "__iadd__", "slot_nb_inplace_add", "binaryfunc"),
     ("nb_inplace_subtract", "__isub__", "slot_nb_inplace_subtract", None),
-    ("nb_inplace_multiply", "__imul__", "slot_nb_inplace_multiply", "nb"),
+    ("nb_inplace_multiply", "__imul__", "slot_nb_inplace_multiply", "binaryfunc"),
     ("nb_inplace_remainder", "__imod__", "slot_nb_inplace_remainder", None),
     ("nb_inplace_power", "__ipow__", "slot_nb_inplace_power", None),
     ("nb_inplace_lshift", "__ilshift__", "slot_nb_inplace_lshift", None),
@@ -120,6 +112,21 @@ _SLOTDEF_SPECS = (
     ("nb_matrix_multiply", "__matmul__", "slot_nb_matrix_multiply", None),
     ("nb_matrix_multiply", "__rmatmul__", "slot_nb_matrix_multiply", None),
     ("nb_inplace_matrix_multiply", "__imatmul__", "slot_nb_inplace_matrix_multiply", None),
+    ("mp_length", "__len__", "slot_sq_length", "lenfunc"),
+    ("mp_subscript", "__getitem__", "slot_mp_subscript", "binaryfunc"),
+    ("mp_ass_subscript", "__setitem__", "slot_mp_ass_subscript", "objobjargproc"),
+    ("mp_ass_subscript", "__delitem__", "slot_mp_ass_subscript", "delitem"),
+    ("sq_length", "__len__", "slot_sq_length", "lenfunc"),
+    # Heap types defining __add__/__mul__ have sq_concat/sq_repeat == NULL (no generic).
+    ("sq_concat", "__add__", None, "binaryfunc"),
+    ("sq_repeat", "__mul__", None, "indexargfunc"),
+    ("sq_repeat", "__rmul__", None, "indexargfunc"),
+    ("sq_item", "__getitem__", "slot_sq_item", "sq_item"),
+    ("sq_ass_item", "__setitem__", "slot_sq_ass_item", "sq_setitem"),
+    ("sq_ass_item", "__delitem__", "slot_sq_ass_item", "sq_delitem"),
+    ("sq_contains", "__contains__", "slot_sq_contains", None),
+    ("sq_inplace_concat", "__iadd__", None, "binaryfunc"),
+    ("sq_inplace_repeat", "__imul__", None, "indexargfunc"),
 )
 
 SLOT_FIELDS = tuple(dict.fromkeys(spec[0] for spec in _SLOTDEF_SPECS))
@@ -130,20 +137,44 @@ STATIC_FIELDS = ("am_send",)
 # Every dunder some slot is made of (`update_slot` only reacts to these).
 SLOT_DUNDERS = frozenset(spec[1] for spec in _SLOTDEF_SPECS) | {"__bases__"}
 
+# dunder -> its slots, in slotdefs order; (field, dunder) -> wrapper token.
+_DUNDER_FIELDS: dict = {}
+_TOKENS: dict = {}
+for _f, _d, _g, _t in _SLOTDEF_SPECS:
+    _DUNDER_FIELDS.setdefault(_d, []).append(_f)
+    _TOKENS[(_f, _d)] = _t
+_AMBIGUOUS_DUNDERS = frozenset(d for d, fields in _DUNDER_FIELDS.items() if len(fields) > 1)
+_AMBIGUOUS_FIELDS = frozenset(f for d in _AMBIGUOUS_DUNDERS for f in _DUNDER_FIELDS[d])
+del _f, _d, _g, _t
+
+_TYPE_ID = id(type)
+
+DICT_NONE, DICT_STD, DICT_SPECIAL = 0, 1, 2
+
 
 class PyTypeObject:
-    """The slot table of one host type."""
-    __slots__ = ("type", "tp_name", "tp_flags", "tp_mro", "tp_mro_dicts",
-                 "tp_dictdescr") + SLOT_FIELDS + STATIC_FIELDS
+    """The slot table of one host type.
+
+    CPython keeps the slots in the type object; a host type cannot be extended, so
+    the tables live in `_views`, keyed by the id of the type with a weak reference
+    that drops the entry when the type dies. A table holds data only (ids, flags,
+    slot functions, a version tag), nothing that owns the type, and every lookup is
+    given the type itself."""
+    __slots__ = ("tp_ref", "tp_id", "tp_name", "tp_flags", "tp_mro_ids", "tp_version_tag",
+                 "tp_dictkind", "tp_has_sequence") + SLOT_FIELDS + STATIC_FIELDS
 
     def __init__(self, tp):
-        self.type = tp
-        mro = _tp_mro(tp)
-        self.tp_mro = mro
-        self.tp_mro_dicts = tuple([_tp_dict(base) for base in mro])
-        self.tp_flags = _tp_flags(tp) | _EXTRA_FLAGS.get(tp, 0)
+        ident = id(tp)
+        self.tp_id = ident
+        self.tp_ref = None
+        self.tp_mro_ids = frozenset([id(base) for base in _tp_mro(tp) or ()])
+        self.tp_version_tag = _next_version_tag()
+        self.tp_flags = _tp_flags(tp) | _EXTRA_FLAGS.get(ident, 0)
         self.tp_name = _compute_tp_name(tp, self.tp_flags)
-        self.tp_dictdescr = NULL
+        self.tp_dictkind = DICT_NONE
+        # A heap type always carries a PySequenceMethods; a static one only if it
+        # defines sq_* slots (listed in _HOST_TYPES).
+        self.tp_has_sequence = bool(self.tp_flags & Py_TPFLAGS_HEAPTYPE)
         for field in SLOT_FIELDS + STATIC_FIELDS:
             setattr(self, field, None)
 
@@ -153,7 +184,9 @@ class PyTypeObject:
 
 def _compute_tp_name(tp, flags) -> str:
     name = _tp_name_attr(tp)
-    if flags & Py_TPFLAGS_HEAPTYPE:
+    # Classes defined in Python have tp_name == __name__; C types made from a
+    # PyType_Spec (heap types, immutable) have a dotted "module.name".
+    if flags & Py_TPFLAGS_HEAPTYPE and not flags & Py_TPFLAGS_IMMUTABLETYPE:
         return name
     module = _tp_module(tp)
     if type(module) is not str or module == "builtins":
@@ -161,19 +194,124 @@ def _compute_tp_name(tp, flags) -> str:
     return f"{module}.{name}"
 
 
+# --- the real slots of host C types ---------------------------------------------
+#
+# CPython knows, from `d_base` of a wrapper_descriptor, which slot a dunder of a C
+# type stands for. The host only gives the descriptor, so the slots of the host's
+# builtin types are listed here, from their PyTypeObject definitions (the
+# PySequenceMethods / PyMappingMethods / PyNumberMethods initializers, and the
+# PyType_Spec slot arrays of the heap types). Only slots that share a dunder with
+# another slot are listed ("nb_add" vs "sq_concat", "sq_item" vs "mp_subscript",
+# ...); the others follow from the dunder alone. Entry: (has tp_as_sequence,
+# has tp_as_mapping, those slots).
+# A host type that is not listed is treated like a heap type: its dunders are
+# dispatched through the generic slot_* functions, no guessing.
+
+def _sq(*fields):
+    return fields
+
+
+_SEQ_LIST = ("sq_length", "sq_concat", "sq_repeat", "sq_item", "sq_ass_item",
+             "sq_inplace_concat", "sq_inplace_repeat")
+_HOST_TYPES: dict = {}      # id(host type) -> (has_sequence, has_mapping, frozenset of slots)
+
+
+def _register_host_type(tp, has_sequence, has_mapping, fields) -> None:
+    _HOST_TYPES[id(tp)] = (has_sequence, has_mapping, frozenset(fields))
+
+
+def _register_host_types() -> None:
+    reg = _register_host_type
+    # Objects/listobject.c: list_as_sequence, list_as_mapping
+    reg(list, True, True, _SEQ_LIST + ("mp_length", "mp_subscript", "mp_ass_subscript"))
+    # Objects/tupleobject.c
+    reg(tuple, True, True, ("sq_length", "sq_concat", "sq_repeat", "sq_item",
+                            "mp_length", "mp_subscript"))
+    # Objects/unicodeobject.c
+    reg(str, True, True, ("sq_length", "sq_concat", "sq_repeat", "sq_item",
+                          "mp_length", "mp_subscript"))
+    # Objects/bytesobject.c
+    reg(bytes, True, True, ("sq_length", "sq_concat", "sq_repeat", "sq_item",
+                            "mp_length", "mp_subscript"))
+    # Objects/bytearrayobject.c
+    reg(bytearray, True, True, _SEQ_LIST + ("mp_length", "mp_subscript", "mp_ass_subscript"))
+    # Objects/rangeobject.c
+    reg(range, True, True, ("sq_length", "sq_item", "mp_length", "mp_subscript"))
+    # Objects/dictobject.c: dict_as_sequence only has sq_contains
+    reg(dict, True, True, ("mp_length", "mp_subscript", "mp_ass_subscript"))
+    # Objects/setobject.c
+    reg(set, True, False, ("sq_length",))
+    reg(frozenset, True, False, ("sq_length",))
+    # Objects/dictobject.c: dictkeys_as_sequence & co
+    reg(type({}.keys()), True, False, ("sq_length",))
+    reg(type({}.values()), True, False, ("sq_length",))
+    reg(type({}.items()), True, False, ("sq_length",))
+    # Objects/descrobject.c: mappingproxy_as_mapping, mappingproxy_as_sequence
+    reg(types.MappingProxyType, True, True, ("mp_length", "mp_subscript"))
+    # Objects/memoryobject.c
+    reg(memoryview, True, True, ("sq_length", "sq_item", "mp_length", "mp_subscript",
+                                 "mp_ass_subscript"))
+    # Number types: nb_add / nb_multiply, no sequence or mapping (bool inherits int's)
+    for tp in (int, bool, float, complex):
+        reg(tp, False, False, ("nb_add", "nb_multiply"))
+    for tp in (object, type, type(None)):
+        reg(tp, False, False, ())
+
+
+def _host_base_field(owner, dunder):
+    """The slot a wrapper_descriptor of `owner` for `dunder` was made from
+    (`d_base`): the first slot, in slotdefs order, that `owner` has. None when
+    `owner` is not a known host type."""
+    entry = _HOST_TYPES.get(id(owner))
+    if entry is None:
+        return None
+    for field in _DUNDER_FIELDS[dunder]:
+        if field in entry[2]:
+            return field
+    return None
+
+
+def _mro_host_fields(tp) -> frozenset:
+    """The ambiguous slots set on the host types of the MRO (what a heap subtype
+    inherits)."""
+    fields = set()
+    for base in _tp_mro(tp):
+        entry = _HOST_TYPES.get(id(base))
+        if entry is not None:
+            fields |= entry[2]
+    return fields
+
+
 # --- views --------------------------------------------------------------------
 
-_views: dict = {}              # id(host type) -> PyTypeObject (the view keeps the type alive)
-_EXTRA_FLAGS: dict = {}        # host type -> extra tp_flags (types pp defines in Python)
-_STATIC_SLOTS: dict = {}       # host type -> {field: function}: "C" slots implemented by pp
+_views: dict = {}              # id(type) -> PyTypeObject, dropped when the type dies
+_views_get = _views.get
+_EXTRA_FLAGS: dict = {}        # id(host type) -> extra tp_flags (types pp defines in Python)
+_STATIC_SLOTS: dict = {}       # id(host type) -> {field: function}: "C" slots implemented by pp
 _C_WRAPPER_SLOTS: dict = {}    # (field, id(wrapper_descriptor)) -> function implemented by pp
+_object_getattribute = object.__dict__["__getattribute__"]
+_object_setattr = object.__setattr__
+_object_delattr = object.__delattr__
+_object_getstate = object.__dict__["__getstate__"]
+_tp_dictoffset = type.__dict__["__dictoffset__"].__get__
+
+# Type version tags (Objects/typeobject.c): a table gets a new tag whenever the
+# type or a base changes, so entries of the method cache made under the old one
+# can never match again. Tags are never reused.
+_version_tag = 0
+
+
+def _next_version_tag() -> int:
+    global _version_tag
+    _version_tag += 1
+    return _version_tag
 
 
 def register_static_slots(tp, flags=0, **slots) -> None:
     """Declare slots of a type pp implements itself (the C struct's initializers)."""
-    _EXTRA_FLAGS[tp] = flags
-    _STATIC_SLOTS[tp] = slots
-    _views.pop(id(tp), None)
+    _EXTRA_FLAGS[id(tp)] = flags
+    _STATIC_SLOTS[id(tp)] = slots
+    PyType_Modified(tp)
 
 
 def register_wrapper_slot(field, wrapper, function) -> None:
@@ -182,72 +320,141 @@ def register_wrapper_slot(field, wrapper, function) -> None:
 
 
 def Py_TYPE(o) -> PyTypeObject:
-    tp = type(o)
-    view = _views.get(id(tp))
-    if view is None:
-        view = _new_view(tp)
-    return view
+    return PyType_View(type(o))
 
 
 def PyType_View(tp) -> PyTypeObject:
     """The PyTypeObject of a host type object."""
-    view = _views.get(id(tp))
-    if view is None:
-        view = _new_view(tp)
-    return view
+    return _views_get(id(tp)) or _new_view(tp)
+
+
+def _drop_view(ident, ref) -> None:
+    """The weakref callback of a type: forget its table (unless a newer type took
+    the id and already has its own)."""
+    view = _views_get(ident)
+    if view is not None and view.tp_ref is ref:
+        del _views[ident]
 
 
 def _new_view(tp) -> PyTypeObject:
     view = PyTypeObject(tp)
-    _views[id(tp)] = view
-    fixup_slot_dispatchers(view)
-    view.tp_dictdescr = _find_dict_descriptor(view)
+    if _tp_mro(tp) is None:
+        # A class under construction, asked about by an overridden mro(): no MRO
+        # yet, so no slots; not kept.
+        return view
+    ident = view.tp_id
+    # Every live heap type is weakly referenced (by its base's subclasses): none
+    # left means its weakrefs were cleared and it is being finalized, so a
+    # callback would never run; use the table without keeping it.
+    dying = view.tp_flags & Py_TPFLAGS_HEAPTYPE and _getweakrefcount(tp) == 0
+    if not dying:
+        view.tp_ref = _ref(tp, lambda ref, ident=ident: _drop_view(ident, ref))
+    _views[ident] = view
+    try:
+        fixup_slot_dispatchers(tp, view)
+        view.tp_dictkind = _find_dict_kind(tp)
+        host = _HOST_TYPES.get(ident)
+        if host is not None:
+            view.tp_has_sequence = host[0]
+    finally:
+        if dying:
+            del _views[ident]
     return view
 
 
-def _find_dict_descriptor(view):
-    descr = _PyType_Lookup(view, "__dict__")
+def _find_dict_kind(tp) -> int:
+    """How `_PyObject_GetDictPtr` finds the dict of an instance."""
+    if _tp_dictoffset(tp) == 0:
+        return DICT_NONE
+    descr = _PyType_Lookup(tp, "__dict__")
     if type(descr) is _GetSetDescr or type(descr) is _MemberDescr:
-        return descr
-    return NULL
+        return DICT_STD
+    return DICT_SPECIAL         # e.g. a class defining `__dict__` as a property
+
+
+def _PyObject_GetDictPtr(obj, view):
+    """The instance dict of `obj`, or None if its type has none (or, for a type
+    whose `__dict__` attribute is not the dict's descriptor, none yet)."""
+    kind = view.tp_dictkind
+    if kind == DICT_STD:
+        return _object_getattribute(obj, "__dict__")
+    if kind == DICT_NONE:
+        return None
+    # The dict lives at tp_dictoffset whatever `__dict__` means to the class.
+    # `object.__getstate__` hands out that very dict (None when it is empty).
+    state = _object_getstate(obj)
+    if type(state) is tuple:
+        state = state[0]
+    return state
 
 
 def PyType_Modified(tp) -> None:
     """Drop the slot tables of `tp` and its subclasses (rebuilt lazily from the
-    MRO). Called after attribute assignment on a type (update_slot)."""
+    MRO). Called after any change to a type's dict or bases."""
     _views.pop(id(tp), None)
     for sub in _tp_subclasses(tp):
         PyType_Modified(sub)
 
 
+def _clear_lookup_cache(tp) -> None:
+    """`type_modified` for a change that leaves the slots alone: a new version tag
+    retires every method-cache entry of `tp` and its subclasses."""
+    view = _views_get(id(tp))
+    if view is not None:
+        view.tp_version_tag = _next_version_tag()
+    for sub in _tp_subclasses(tp):
+        _clear_lookup_cache(sub)
+
+
 def update_slot(tp, name) -> None:
-    if name in SLOT_DUNDERS:
+    if type(name) is str and name in SLOT_DUNDERS:
         PyType_Modified(tp)
+    else:
+        _clear_lookup_cache(tp)
 
 
 def PyType_Check(o) -> bool:
-    return PyType_IsSubtype(Py_TYPE(o), _TYPE_VIEW())
-
-
-def _TYPE_VIEW():
-    return PyType_View(type)
+    if type(o) is type:
+        return True
+    return _TYPE_ID in Py_TYPE(o).tp_mro_ids
 
 
 def PyType_IsSubtype(a, b) -> bool:
     """a, b are PyTypeObject views."""
-    target = b.type
-    for base in a.tp_mro:
-        if base is target:
-            return True
-    return False
+    return b.tp_id in a.tp_mro_ids
+
+
+# The method cache: a fixed-size array indexed by a hash of (tp_version_tag, name).
+# An entry is overwritten on collision and matches only the version tag it was made
+# under. It does not own the type: what the lookup found in the type's own dict is
+# not stored (a method using `__class__` would keep its class alive), only what a
+# base provides, or that nothing was found.
+_MCACHE_SIZE = 1 << 12
+_MCACHE_MASK = _MCACHE_SIZE - 1
+_MCACHE = [(0, None, None)] * _MCACHE_SIZE
 
 
 def _PyType_Lookup(tp, name):
-    """MRO lookup; `tp` is a PyTypeObject view. Returns NULL if absent."""
-    for d in tp.tp_mro_dicts:
-        res = _type_dictget(d, name, NULL)
+    """MRO lookup in the host type `tp`. Returns NULL if absent."""
+    view = _views_get(id(tp)) or _new_view(tp)
+    tag = view.tp_version_tag
+    if type(name) is str:
+        index = (tag ^ hash(name)) & _MCACHE_MASK
+        entry = _MCACHE[index]
+        if entry[0] == tag and entry[1] is name:
+            return entry[2]
+    else:
+        index = -1
+    depth = 0
+    for base in _tp_mro(tp):
+        res = _type_dictget(_tp_dict(base), name, NULL)
         if res is not NULL:
+            if depth and index >= 0:
+                _MCACHE[index] = (tag, name, res)
             return res
+        depth += 1
+    if index >= 0:
+        _MCACHE[index] = (tag, name, NULL)
     return NULL
 
 
@@ -256,10 +463,7 @@ def PyObject_TypeCheck(o, tp) -> bool:
     cls = type(o)
     if cls is tp:
         return True
-    for base in Py_TYPE(o).tp_mro:
-        if base is tp:
-            return True
-    return False
+    return id(tp) in Py_TYPE(o).tp_mro_ids
 
 
 # --- filling slots (update_one_slot / fixup_slot_dispatchers) -----------------
@@ -268,45 +472,48 @@ _SLOT_GROUPS: dict = {}
 
 
 def _group_slotdefs():
-    for field, dunder, function, kind in _SLOTDEF_SPECS:
-        _SLOT_GROUPS.setdefault(field, []).append((dunder, function, kind))
+    for field, dunder, function, token in _SLOTDEF_SPECS:
+        _SLOT_GROUPS.setdefault(field, []).append((dunder, function, token))
 
 
 _group_slotdefs()
 
 
-def _wrapper_kind(descr, name) -> str:
-    """Which protocol (`nb` or `sq`) a host wrapper_descriptor of a dunder shared by
-    both belongs to. CPython knows it from `d_base`; the host does not say, so
-    infer it from the owning type: sequence types (`__len__`, no `__radd__`)
-    define `__add__`/`__mul__`/`__iadd__`/`__imul__` through sq_concat/sq_repeat."""
-    owner_dict = _tp_dict(descr.__objclass__)
-    if name == "__add__":
-        return "nb" if "__radd__" in owner_dict else "sq"
-    return "sq" if "__len__" in owner_dict else "nb"
-
-
-def update_one_slot(tp, field) -> None:
+def update_one_slot(tp, view, field) -> None:
     specific_found = {}
     owner = None
     generic = None
     use_generic = False
     have_specific = False
     missing_iternext = False
-    for dunder, function, kind in _SLOT_GROUPS[field]:
+    host_fields = None
+    for dunder, function, token in _SLOT_GROUPS[field]:
         descr = _PyType_Lookup(tp, dunder)
         if descr is NULL:
             if field == "tp_iternext":
                 missing_iternext = True
             continue
         if type(descr) is _WrapperDescr and descr.__name__ == dunder:
-            if kind is not None and _wrapper_kind(descr, dunder) != kind:
-                # The wrapper wraps the other protocol's slot (tptr != ptr).
-                use_generic = True
-                continue
-            generic = _GENERIC.get(function)
             objclass = descr.__objclass__
-            if (owner is None or owner is objclass) and _is_subtype_with_mro(tp, objclass):
+            if dunder in _AMBIGUOUS_DUNDERS:
+                base_field = _host_base_field(objclass, dunder)
+                if base_field is None:
+                    # A wrapper of a host type whose slots are not known: a plain
+                    # method, called through the generic slot function.
+                    use_generic = True
+                    generic = _GENERIC.get(function)
+                    continue
+                if host_fields is None:
+                    host_fields = _mro_host_fields(tp)
+                present = [f for f in _DUNDER_FIELDS[dunder] if f in host_fields]
+                if len(present) != 1 or present[0] == field:
+                    generic = _GENERIC.get(function)
+                matches = _TOKENS[(base_field, dunder)] == token
+            else:
+                generic = _GENERIC.get(function)
+                matches = True
+            if matches and (owner is None or owner is objclass) \
+                    and id(objclass) in view.tp_mro_ids:
                 owner = objclass
                 specific_found[dunder] = descr
                 have_specific = True
@@ -321,23 +528,34 @@ def update_one_slot(tp, field) -> None:
         value = _PyObject_NextNotImplemented
     else:
         value = generic
-    setattr(tp, field, value)
+    setattr(view, field, value)
 
 
-def _is_subtype_with_mro(tp, objclass) -> bool:
-    for base in tp.tp_mro:
-        if base is objclass:
-            return True
-    return False
+def _host_slot(tp, view, field, fields):
+    """A slot of a known host type itself: set exactly when the C type sets it."""
+    if field not in fields:
+        return None
+    found = {}
+    for dunder, function, token in _SLOT_GROUPS[field]:
+        descr = _PyType_Lookup(tp, dunder)
+        if descr is not NULL:
+            found[dunder] = descr
+    if not found:
+        return None
+    return _c_slot(field, found)
 
 
-def fixup_slot_dispatchers(tp) -> None:
+def fixup_slot_dispatchers(tp, view) -> None:
+    host = _HOST_TYPES.get(view.tp_id)
     for field in SLOT_FIELDS:
-        update_one_slot(tp, field)
-    static = _STATIC_SLOTS.get(tp.type)
+        if host is not None and field in _AMBIGUOUS_FIELDS:
+            setattr(view, field, _host_slot(tp, view, field, host[2]))
+        else:
+            update_one_slot(tp, view, field)
+    static = _STATIC_SLOTS.get(view.tp_id)
     if static:
         for field, function in static.items():
-            setattr(tp, field, function)
+            setattr(view, field, function)
 
 
 def _PyObject_NextNotImplemented(self):
@@ -362,8 +580,17 @@ def _c_slot(field, found):
         fn = fns.pop()          # a slot function pp implements itself
     else:
         fn = _ADAPTERS[field](found)
-    _adapter_cache[key] = (fn, tuple(found.values()))  # keep the wrappers (ids) alive
+    # Cache only adapters over descriptors of static types: they live forever
+    # anyway, so the cache cannot keep a class alive. (The cache entry keeps the
+    # descriptors, whose ids are in the key.)
+    if all(_descr_owner(d) is not None and not (_tp_flags(_descr_owner(d)) & Py_TPFLAGS_HEAPTYPE)
+           for d in found.values()):
+        _adapter_cache[key] = (fn, tuple(found.values()))
     return fn
+
+
+def _descr_owner(d):
+    return getattr(d, "__objclass__", None)
 
 
 def _unary_adapter(found):
@@ -497,6 +724,7 @@ _ADAPTERS = {
     "sq_concat": _binary_adapter,
     "sq_repeat": _binary_adapter,
     "sq_item": _binary_adapter,
+    "sq_ass_item": _setter_deleter_adapter("__setitem__", "__delitem__"),
     "sq_contains": _binary_adapter,
     "sq_inplace_concat": _binary_adapter,
     "sq_inplace_repeat": _binary_adapter,
@@ -546,7 +774,7 @@ def _suppressing_attribute_error(fn, *args):
     try:
         res = fn(*args)
     except AttributeError as e:
-        err = e
+        err = True    # not the exception itself: it would form a cycle with its traceback
     if err is not None:
         _PyErr_Clear(_PyThreadState_GET())
         return NULL
@@ -555,8 +783,7 @@ def _suppressing_attribute_error(fn, *args):
 
 def lookup_maybe_method(self, name):
     """-> (method, unbound); method is NULL if the lookup failed."""
-    tp = Py_TYPE(self)
-    value = _PyType_Lookup(tp, name)
+    value = _PyType_Lookup(type(self), name)
     if value is NULL:
         return NULL, False
     vt = Py_TYPE(value)
@@ -564,7 +791,7 @@ def lookup_maybe_method(self, name):
         return value, True          # avoid a temporary bound method
     f = vt.tp_descr_get
     if f is not None:
-        return _suppressing_attribute_error(f, value, self, tp.type), False
+        return _suppressing_attribute_error(f, value, self, type(self)), False
     return value, False
 
 
@@ -647,6 +874,13 @@ def slot_sq_contains(self, value):
     return _object.PyObject_IsTrue(res)
 
 
+def slot_sq_ass_item(self, index, value):
+    if value is NULL:
+        vectorcall_method("__delitem__", (self, index))
+    else:
+        vectorcall_method("__setitem__", (self, index, value))
+
+
 def slot_mp_subscript(self, key):
     return vectorcall_method("__getitem__", (self, key))
 
@@ -685,10 +919,10 @@ def getattr_slot(view, field):
 
 
 def _method_is_overloaded(left, right, name) -> bool:
-    b = _object.PyObject_GetOptionalAttr(Py_TYPE(right).type, name)
+    b = _object.PyObject_GetOptionalAttr(type(right), name)
     if b is NULL:
         return False        # if right doesn't have it, it's not overloaded
-    a = _object.PyObject_GetOptionalAttr(Py_TYPE(left).type, name)
+    a = _object.PyObject_GetOptionalAttr(type(left), name)
     if a is NULL:
         return True         # if right has it but left doesn't, it's overloaded
     return _object.PyObject_RichCompareBool(a, b, _object.Py_NE)
@@ -813,7 +1047,7 @@ def _call_attribute(self, attr, name):
         return _call.PyObject_Vectorcall(attr, (self, name))
     f = vt.tp_descr_get
     if f is not None:
-        attr = f(attr, self, Py_TYPE(self).type)
+        attr = f(attr, self, type(self))
     return _call.PyObject_Vectorcall(attr, (name,))
 
 
@@ -822,12 +1056,12 @@ def _slot_tp_getattro(self, name):
 
 
 def slot_tp_getattr_hook(self, name):
-    tp = Py_TYPE(self)
-    getattr_ = _PyType_Lookup(tp, "__getattr__")
+    cls = type(self)
+    getattr_ = _PyType_Lookup(cls, "__getattr__")
     if getattr_ is NULL:
         # No __getattr__ hook: use a simpler dispatcher.
         return _slot_tp_getattro(self, name)
-    getattribute = _PyType_Lookup(tp, "__getattribute__")
+    getattribute = _PyType_Lookup(cls, "__getattribute__")
     if getattribute is NULL or (type(getattribute) is _WrapperDescr
                                 and _C_WRAPPER_SLOTS.get(("tp_getattro", id(getattribute)),
                                                          (None, None))[1] is _object.PyObject_GenericGetAttr):
@@ -841,7 +1075,7 @@ def slot_tp_getattr_hook(self, name):
     try:
         res = _call_attribute(self, getattribute, name)
     except AttributeError as e:
-        err = e
+        err = True    # not the exception itself: it would form a cycle with its traceback
     if err is not None:
         _PyErr_Clear(_PyThreadState_GET())
         res = _call_attribute(self, getattr_, name)
@@ -885,7 +1119,7 @@ def slot_tp_iternext(self):
 
 def slot_tp_descr_get(self, obj, type_):
     tp = Py_TYPE(self)
-    get = _PyType_Lookup(tp, "__get__")
+    get = _PyType_Lookup(type(self), "__get__")
     if get is NULL:
         # Avoid further slowdowns
         if tp.tp_descr_get is slot_tp_descr_get:
@@ -908,7 +1142,7 @@ def slot_tp_descr_set(self, target, value):
 _GENERIC = {None: None}
 for _n in ("slot_tp_getattr_hook", "slot_tp_setattro", "slot_tp_call", "slot_tp_richcompare",
            "slot_tp_iter", "slot_tp_iternext", "slot_tp_descr_get", "slot_tp_descr_set",
-           "slot_sq_length", "slot_sq_item", "slot_sq_contains", "slot_mp_subscript",
+           "slot_sq_length", "slot_sq_item", "slot_sq_ass_item", "slot_sq_contains", "slot_mp_subscript",
            "slot_mp_ass_subscript", "slot_nb_add", "slot_nb_subtract", "slot_nb_multiply",
            "slot_nb_remainder", "slot_nb_power", "slot_nb_negative", "slot_nb_positive",
            "slot_nb_bool", "slot_nb_invert", "slot_nb_lshift", "slot_nb_rshift", "slot_nb_and",
@@ -952,7 +1186,7 @@ def type_call(callable, args, kwds):
     """tp_call of `type`: calling a class. `type(name, bases, ns)` and metaclass
     calls get the VM-function-aware namespace (see _wrap_type_namespace)."""
     if len(args) == 3 and PyType_IsSubtype(PyType_View(callable), PyType_View(type)) \
-            and _PyType_Lookup(PyType_View(callable), "__new__") is _TYPE_NEW:
+            and _PyType_Lookup(callable, "__new__") is _TYPE_NEW:
         args = (args[0], args[1], _wrap_type_namespace(args[2]))
     if kwds:
         return _TYPE_CALL(callable, *args, **kwds)
@@ -980,10 +1214,10 @@ def _supercheck(su_type, obj):
         return obj
     obj_view = Py_TYPE(obj)
     if PyType_IsSubtype(obj_view, su_type_view):
-        return obj_view.type
+        return type(obj)
     # Try the slow way: obj.__class__ may be a proxy's.
     class_attr = _object.PyObject_GetOptionalAttr(obj, "__class__")
-    if class_attr is not NULL and PyType_Check(class_attr) and class_attr is not obj_view.type:
+    if class_attr is not NULL and PyType_Check(class_attr) and class_attr is not type(obj):
         if PyType_IsSubtype(PyType_View(class_attr), su_type_view):
             return class_attr
     if PyType_Check(obj):
@@ -995,7 +1229,7 @@ def _supercheck(su_type, obj):
 
 
 def _PySuper_LookupDescr(su_type, su_obj_type, name):
-    mro = PyType_View(su_obj_type).tp_mro
+    mro = _tp_mro(su_obj_type)
     n = len(mro)
     i = 0
     # No need to check the last one: it's gonna be skipped anyway.
@@ -1032,6 +1266,58 @@ def _PySuper_Lookup(su_type, su_obj, name, super_type, method_ok):
 _TYPE_NEW_FUNC = type.__new__
 register_wrapper_slot("tp_call", _TYPE_CALL, type_call)
 register_static_slots(types.BuiltinFunctionType, tp_call=cfunction_call)
+
+
+# --- calling the host's `type.__setattr__` & co ------------------------------------
+#
+# In CPython `type_setattro` (the slot behind `type.__setattr__`) calls
+# `update_slot` itself, so every way of changing a type's attributes refreshes its
+# slots. The host's wrapper cannot do that, so calls of wrapper_descriptors and
+# method-wrappers (`type.__setattr__(C, ...)`, `super().__setattr__(...)` in a
+# metaclass, `descr.__set__(C, ...)`) are routed through here.
+
+_TYPE_MUTATORS = frozenset(("__setattr__", "__delattr__", "__set__", "__delete__"))
+
+
+def _call_host(func, args, kwds):
+    if kwds:
+        return func(*args, **kwds)
+    return func(*args)
+
+
+def _type_changed(target, name) -> None:
+    if PyType_Check(target):
+        if name is NULL:
+            PyType_Modified(target)
+        else:
+            update_slot(target, name)
+
+
+def wrapperdescr_call(descr, args, kwds):
+    res = _call_host(descr, args, kwds)
+    name = descr.__name__
+    if name in _TYPE_MUTATORS and args:
+        if name == "__setattr__" or name == "__delattr__":
+            _type_changed(args[0], args[1] if len(args) > 1 else NULL)
+        elif len(args) > 1:
+            _type_changed(args[1], NULL)
+    return res
+
+
+def methodwrapper_call(mw, args, kwds):
+    res = _call_host(mw, args, kwds)
+    name = mw.__name__
+    if name in _TYPE_MUTATORS:
+        if name == "__setattr__" or name == "__delattr__":
+            _type_changed(mw.__self__, args[0] if args else NULL)
+        elif args:
+            _type_changed(args[0], NULL)
+    return res
+
+
+register_static_slots(types.WrapperDescriptorType, tp_call=wrapperdescr_call)
+register_static_slots(types.MethodWrapperType, tp_call=methodwrapper_call)
+_register_host_types()
 
 from pp import call as _call        # noqa: E402,F811
 from pp import object as _object    # noqa: E402,F811

@@ -8,7 +8,7 @@ set, functions here raise; `PYGEN_NEXT` / `PYGEN_RETURN` results are returned as
 
 import types
 
-from pp.errors import (PyErr_GivenExceptionMatches, PyExceptionClass_Check,
+from pp.errors import (PyErr_GivenExceptionMatches, PyErr_WarnEx, PyExceptionClass_Check,
                        _PyErr_ChainStackItem, _PyErr_Clear, _PyErr_SetRaisedException,
                        _PyErr_StackItem, _PyExceptionInstance_Check, _PyThreadState_GET)
 from pp.frame import (FRAME_OWNED_BY_GENERATOR, NULL, _PyFrame_GetFrameObject)
@@ -99,8 +99,8 @@ class PyGenObject:
     def send(self, arg, /):
         return gen_send(self, arg)
 
-    def throw(self, typ, val=None, tb=None, /):
-        return gen_throw(self, typ, val, tb)
+    def throw(self, *args):
+        return gen_throw(self, args)
 
     def close(self):
         return gen_close(self)
@@ -347,7 +347,7 @@ def gen_close(gen):
     try:
         kind, result = gen_send_ex2(gen, None, exc)
     except GeneratorExit as e:
-        caught = e
+        caught = True    # not the exception itself: cycle with its traceback
     if caught is not None:
         _PyErr_Clear(_PyThreadState_GET())      # ignore this error
         return None
@@ -362,9 +362,14 @@ def gen_close(gen):
 
 
 def gen_set_exception(typ, val, tb):
-    """Build the exception instance to throw (the PyErr_NormalizeException part)."""
-    if tb is not None and not isinstance(tb, types.TracebackType):
+    """Build the exception instance to throw (the PyErr_NormalizeException part).
+    `val` / `tb` are NULL when not given."""
+    if tb is None:
+        tb = NULL
+    elif tb is not NULL and not isinstance(tb, types.TracebackType):
         raise TypeError("throw() third argument must be a traceback object")
+    if val is NULL:
+        val = None
     if PyExceptionClass_Check(typ):
         if val is not None and _PyExceptionInstance_Check(val) \
                 and PyErr_GivenExceptionMatches(val, typ):
@@ -384,7 +389,7 @@ def gen_set_exception(typ, val, tb):
         # Not something you can raise. throw() fails.
         raise TypeError("exceptions must be classes or instances deriving from "
                         f"BaseException, not {type(typ).__name__}")
-    if tb is not None:
+    if tb is not NULL:
         exc = exc.with_traceback(tb)
     return exc
 
@@ -410,31 +415,46 @@ def _gen_throw(gen, close_on_genexit, typ, val, tb):
         err = None
         ret = NULL
         throw_here = False
-        try:
-            if PyErr_GivenExceptionMatches(typ, GeneratorExit) and close_on_genexit:
-                # Asynchronous generators *should not* be closed right away; hence
-                # the `close_on_genexit` parameter.
+        meth = NULL
+        if PyErr_GivenExceptionMatches(typ, GeneratorExit) and close_on_genexit:
+            # Asynchronous generators *should not* be closed right away; hence
+            # the `close_on_genexit` parameter.
+            try:
                 gen_close_iter(yf)
-                throw_here = True
-            elif PyGen_CheckExact(yf) or PyCoro_CheckExact(yf):
-                # `yf` is a generator or a coroutine.
+            except BaseException as e:
+                err = e
+            throw_here = err is None
+        elif PyGen_CheckExact(yf) or PyCoro_CheckExact(yf):
+            # `yf` is a generator or a coroutine.
+            try:
                 ret = _gen_throw(yf, close_on_genexit, typ, val, tb)
-            else:
-                # `yf` is an iterator or a coroutine-like object.
-                from pp.object import PyObject_GetOptionalAttr
-                from pp.call import PyObject_Vectorcall
+            except BaseException as e:
+                err = e
+        else:
+            # `yf` is an iterator or a coroutine-like object.
+            from pp.object import PyObject_GetOptionalAttr
+            lookup_err = None
+            try:
                 meth = PyObject_GetOptionalAttr(yf, "throw")
-                if meth is NULL:
-                    throw_here = True
-                else:
-                    args = [typ]
-                    if val is not None:
-                        args.append(val)
-                        if tb is not None:
-                            args.append(tb)
+            except BaseException as e:
+                lookup_err = e
+            if lookup_err is not None:
+                # genobject.c: restore the frame state and propagate.
+                gen.gi_frame_state = frame_state
+                raise lookup_err
+            if meth is NULL:
+                throw_here = True
+            else:
+                from pp.call import PyObject_Vectorcall
+                args = [typ]
+                if val is not NULL:
+                    args.append(val)
+                    if tb is not NULL:
+                        args.append(tb)
+                try:
                     ret = PyObject_Vectorcall(meth, tuple(args))
-        except BaseException as e:
-            err = e
+                except BaseException as e:
+                    err = e
         if err is not None:
             # gen_throw_current_exception: send the error into the generator.
             return _throw_current_exception(gen, err)
@@ -466,7 +486,19 @@ def _throw_current_exception(gen, exc):
     return result
 
 
-def gen_throw(gen, typ, val=None, tb=None):
+def gen_throw(gen, args):
+    nargs = len(args)
+    if nargs < 1:
+        raise TypeError(f"throw expected at least 1 argument, got {nargs}")
+    if nargs > 3:
+        raise TypeError(f"throw expected at most 3 arguments, got {nargs}")
+    if nargs > 1:
+        PyErr_WarnEx(DeprecationWarning,
+                     "the (type, exc, tb) signature of throw() is deprecated, "
+                     "use the single-arg signature instead.", 1)
+    typ = args[0]
+    val = args[1] if nargs > 1 else NULL
+    tb = args[2] if nargs > 2 else NULL
     return _gen_throw(gen, True, typ, val, tb)
 
 

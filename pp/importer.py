@@ -31,7 +31,6 @@ HOST_MODULES_PERMANENT = frozenset({
     "errno",
     "time",
     "marshal",
-    "_warnings",
     "_typing",      # TypeVar & co. are object-model types (also used by intrinsics)
     "_codecs",
     "_signal",
@@ -40,6 +39,9 @@ HOST_MODULES_PERMANENT = frozenset({
     "_ast",         # AST node types; compilation is borrowed from the host
     "_tokenize",    # tokenizer; same boundary as compile()
 })
+
+# Builtin as importlib sees them (`_imp.is_builtin`), but implemented in pp/lib.
+PP_BUILTIN_MODULES = frozenset({"_warnings"})
 
 # Temporary: C modules we intend to replace with pure Python (pp/lib). Each
 # entry is tracked debt.
@@ -230,10 +232,23 @@ class Importer:
             return None
 
         def is_builtin(name, /):
+            if name in PP_BUILTIN_MODULES:
+                return 1
             return host_imp.is_builtin(name) if name in HOST_MODULES else 0
 
+        def create_builtin(spec, /):
+            if spec.name in PP_BUILTIN_MODULES:
+                return self._load(spec.name, None)
+            return host_imp.create_builtin(spec)
+
+        def exec_builtin(mod, /):
+            if mod.__name__ in PP_BUILTIN_MODULES:
+                return 0
+            return host_imp.exec_builtin(mod)
+
         mod.__dict__.update(__getattr__=__getattr__, is_frozen=is_frozen,
-                            find_frozen=find_frozen, is_builtin=is_builtin)
+                            find_frozen=find_frozen, is_builtin=is_builtin,
+                            create_builtin=create_builtin, exec_builtin=exec_builtin)
         return mod
 
     # --- the VM's sys module ---
@@ -302,7 +317,7 @@ class Importer:
                   modules=vm.modules, path=self.sys_path, meta_path=[VMFinder(self)], path_hooks=[],
                   path_importer_cache={},
                   builtin_module_names=tuple(n for n in sys.builtin_module_names
-                                             if n in HOST_MODULES))
+                                             if n in HOST_MODULES) + tuple(PP_BUILTIN_MODULES))
         return mod
 
     # --- importlib._bootstrap ---
