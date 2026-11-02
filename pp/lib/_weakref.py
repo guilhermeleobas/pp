@@ -290,9 +290,8 @@ class ProxyType:
         o = _obj(self)
         if mod is None:
             o **= _unwrap(other)
-        else:
-            pow(o, _unwrap(other), _unwrap(mod))
-        return self
+            return o
+        return pow(o, _unwrap(other), _unwrap(mod))
 
     def __add__(self, other):
         return _obj(self) + _unwrap(other)
@@ -303,7 +302,7 @@ class ProxyType:
     def __iadd__(self, other):
         o = _obj(self)
         o += _unwrap(other)
-        return self
+        return o
 
     def __sub__(self, other):
         return _obj(self) - _unwrap(other)
@@ -314,7 +313,7 @@ class ProxyType:
     def __isub__(self, other):
         o = _obj(self)
         o -= _unwrap(other)
-        return self
+        return o
 
     def __mul__(self, other):
         return _obj(self) * _unwrap(other)
@@ -325,7 +324,7 @@ class ProxyType:
     def __imul__(self, other):
         o = _obj(self)
         o *= _unwrap(other)
-        return self
+        return o
 
     def __truediv__(self, other):
         return _obj(self) / _unwrap(other)
@@ -336,7 +335,7 @@ class ProxyType:
     def __itruediv__(self, other):
         o = _obj(self)
         o /= _unwrap(other)
-        return self
+        return o
 
     def __floordiv__(self, other):
         return _obj(self) // _unwrap(other)
@@ -347,7 +346,7 @@ class ProxyType:
     def __ifloordiv__(self, other):
         o = _obj(self)
         o //= _unwrap(other)
-        return self
+        return o
 
     def __mod__(self, other):
         return _obj(self) % _unwrap(other)
@@ -358,7 +357,7 @@ class ProxyType:
     def __imod__(self, other):
         o = _obj(self)
         o %= _unwrap(other)
-        return self
+        return o
 
     def __lshift__(self, other):
         return _obj(self) << _unwrap(other)
@@ -369,7 +368,7 @@ class ProxyType:
     def __ilshift__(self, other):
         o = _obj(self)
         o <<= _unwrap(other)
-        return self
+        return o
 
     def __rshift__(self, other):
         return _obj(self) >> _unwrap(other)
@@ -380,7 +379,7 @@ class ProxyType:
     def __irshift__(self, other):
         o = _obj(self)
         o >>= _unwrap(other)
-        return self
+        return o
 
     def __and__(self, other):
         return _obj(self) & _unwrap(other)
@@ -391,7 +390,7 @@ class ProxyType:
     def __iand__(self, other):
         o = _obj(self)
         o &= _unwrap(other)
-        return self
+        return o
 
     def __or__(self, other):
         return _obj(self) | _unwrap(other)
@@ -402,7 +401,7 @@ class ProxyType:
     def __ior__(self, other):
         o = _obj(self)
         o |= _unwrap(other)
-        return self
+        return o
 
     def __xor__(self, other):
         return _obj(self) ^ _unwrap(other)
@@ -413,7 +412,7 @@ class ProxyType:
     def __ixor__(self, other):
         o = _obj(self)
         o ^= _unwrap(other)
-        return self
+        return o
 
     def __matmul__(self, other):
         return _obj(self) @ _unwrap(other)
@@ -424,7 +423,7 @@ class ProxyType:
     def __imatmul__(self, other):
         o = _obj(self)
         o @= _unwrap(other)
-        return self
+        return o
 
     def __neg__(self):
         return -_obj(self)
@@ -554,9 +553,8 @@ class CallableProxyType:
         o = _obj(self)
         if mod is None:
             o **= _unwrap(other)
-        else:
-            pow(o, _unwrap(other), _unwrap(mod))
-        return self
+            return o
+        return pow(o, _unwrap(other), _unwrap(mod))
 
     def __call__(self, *args, **kwargs):
         return _obj(self)(*args, **kwargs)
@@ -570,7 +568,7 @@ class CallableProxyType:
     def __iadd__(self, other):
         o = _obj(self)
         o += _unwrap(other)
-        return self
+        return o
 
     def __sub__(self, other):
         return _obj(self) - _unwrap(other)
@@ -581,7 +579,7 @@ class CallableProxyType:
     def __isub__(self, other):
         o = _obj(self)
         o -= _unwrap(other)
-        return self
+        return o
 
     def __mul__(self, other):
         return _obj(self) * _unwrap(other)
@@ -592,7 +590,7 @@ class CallableProxyType:
     def __imul__(self, other):
         o = _obj(self)
         o *= _unwrap(other)
-        return self
+        return o
 
     def __truediv__(self, other):
         return _obj(self) / _unwrap(other)
@@ -603,7 +601,7 @@ class CallableProxyType:
     def __itruediv__(self, other):
         o = _obj(self)
         o /= _unwrap(other)
-        return self
+        return o
 
     def __floordiv__(self, other):
         return _obj(self) // _unwrap(other)
@@ -614,7 +612,7 @@ class CallableProxyType:
     def __ifloordiv__(self, other):
         o = _obj(self)
         o //= _unwrap(other)
-        return self
+        return o
 
     def __mod__(self, other):
         return _obj(self) % _unwrap(other)
@@ -625,7 +623,7 @@ class CallableProxyType:
     def __imod__(self, other):
         o = _obj(self)
         o %= _unwrap(other)
-        return self
+        return o
 
     def __lshift__(self, other):
         return _obj(self) << _unwrap(other)
@@ -636,7 +634,7 @@ class CallableProxyType:
     def __ilshift__(self, other):
         o = _obj(self)
         o <<= _unwrap(other)
-        return self
+        return o
 
     def __rshift__(self, other):
         return _obj(self) >> _unwrap(other)
@@ -647,7 +645,7 @@ class CallableProxyType:
     def __irshift__(self, other):
         o = _obj(self)
         o >>= _unwrap(other)
-        return self
+        return o
 
     def __and__(self, other):
         return _obj(self) & _unwrap(other)
@@ -658,7 +656,7 @@ class CallableProxyType:
     def __iand__(self, other):
         o = _obj(self)
         o &= _unwrap(other)
-        return self
+        return o
 
     def __or__(self, other):
         return _obj(self) | _unwrap(other)
@@ -669,7 +667,7 @@ class CallableProxyType:
     def __ior__(self, other):
         o = _obj(self)
         o |= _unwrap(other)
-        return self
+        return o
 
     def __xor__(self, other):
         return _obj(self) ^ _unwrap(other)
@@ -680,7 +678,7 @@ class CallableProxyType:
     def __ixor__(self, other):
         o = _obj(self)
         o ^= _unwrap(other)
-        return self
+        return o
 
     def __matmul__(self, other):
         return _obj(self) @ _unwrap(other)
@@ -691,7 +689,7 @@ class CallableProxyType:
     def __imatmul__(self, other):
         o = _obj(self)
         o @= _unwrap(other)
-        return self
+        return o
 
     def __neg__(self):
         return -_obj(self)
