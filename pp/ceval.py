@@ -39,6 +39,7 @@ from pp.funcobject import Function, PyFunction_New, bind_arguments, builtins_fro
 from pp.genobject import PyAsyncGenObject, PyCoroObject, PyGenObject, gen_send_ex
 
 _GenericGetAttr = _obj.PyObject_GenericGetAttr
+_GenericGetAttrDescr = _obj._PyObject_GenericGetAttrDescr
 _GenericSetAttr = _obj.PyObject_GenericSetAttr
 _object_getattribute = _typeobject._object_getattribute
 DICT_STD = _typeobject.DICT_STD
@@ -1451,8 +1452,9 @@ class VirtualMachine:
             f.stack.append(owner if meth_found else NULL)
         elif view.tp_getattro is _GenericGetAttr:
             # PyObject_GetAttr -> tp_getattro, minus the error-context wrapper
-            # (the generic getattr sets name/obj itself).
-            f.stack.append(_GenericGetAttr(owner, name))
+            # (the generic getattr sets name/obj itself) and the type lookup
+            # already done.
+            f.stack.append(_GenericGetAttrDescr(owner, name, view, descr))
         else:
             f.stack.append(PyObject_GetAttr(owner, name))
 

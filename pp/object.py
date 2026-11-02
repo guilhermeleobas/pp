@@ -169,8 +169,12 @@ def PyObject_GenericGetAttr(obj, name):
     tp = _views_get(id(cls)) or Py_TYPE(obj)
     if type(name) is not str and not PyUnicode_Check(name):
         raise _name_error(name)
+    return _PyObject_GenericGetAttrDescr(obj, name, tp, _PyType_Lookup(cls, name))
 
-    descr = _PyType_Lookup(cls, name)
+
+def _PyObject_GenericGetAttrDescr(obj, name, tp, descr):
+    """The rest of PyObject_GenericGetAttr, given the type's slot table `tp` and
+    what _PyType_Lookup found (`name` is a str)."""
     f = None
     if descr is not NULL:
         descr_type = _views_get(id(type(descr))) or Py_TYPE(descr)
