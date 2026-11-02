@@ -321,7 +321,8 @@ def register_wrapper_slot(field, wrapper, function) -> None:
 
 
 def Py_TYPE(o) -> PyTypeObject:
-    return PyType_View(type(o))
+    tp = type(o)
+    return _views_get(id(tp)) or _new_view(tp)      # PyType_View(type(o)), inlined
 
 
 def PyType_View(tp) -> PyTypeObject:
