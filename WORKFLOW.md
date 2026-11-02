@@ -10,6 +10,7 @@ Those belong to subagents, each in its own git worktree.
 |---|---|---|---|
 | Implementer | Sonnet (Opus if Sonnet's work is rejected twice) | own worktree, branch `impl/<task>` | commits on its branch |
 | Tester | Sonnet | own worktree, branch `test/<task>` | blind tests on its branch; never reads `pp/` changes of the task |
+| Performance work | Fable or Opus (never Sonnet) | own worktree, branch `perf/<task>` | commits on its branch, with before/after timings |
 | Reviewer | Opus | read-only, against the implementer's branch | findings with reproducers |
 | Gate | Sonnet | own worktree, merges `impl/<task>` + `test/<task>` | test + CPython-test numbers vs baseline |
 | Judge | Opus | read-only | `MERGE` / `FIX` / `REJECT` with reasons, given reviewer + gate reports |
