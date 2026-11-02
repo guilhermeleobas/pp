@@ -13,7 +13,18 @@ sequence check, which cannot see ``sq_item`` and approximates it with
 ``type(a).__getitem__`` being present and not ``dict.__getitem__``.
 """
 
-import operator as _operator
+
+
+def _ssize(v):
+    # Py_ssize_t argument conversion: an index, range-checked.
+    m = getattr(type(v), '__index__', None)
+    if m is None:
+        raise TypeError(f"'{type(v).__name__}' object cannot be interpreted "
+                        "as an integer")
+    v = m(v)
+    if not -(1 << 63) <= v < (1 << 63):
+        raise OverflowError("Python int too large to convert to C ssize_t")
+    return v
 
 
 def _check_sequence(a):
@@ -26,13 +37,13 @@ def _check_sequence(a):
 
 
 def _args(a, lo, hi):
-    lo = _operator.index(lo)
+    lo = _ssize(lo)
     if lo < 0:
         raise ValueError('lo must be non-negative')
     if hi is None:
         hi = -1
     else:
-        hi = _operator.index(hi)
+        hi = _ssize(hi)
     if hi == -1:
         hi = len(a)
     _check_sequence(a)
