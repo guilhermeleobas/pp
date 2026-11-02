@@ -42,6 +42,9 @@ class _BuiltinFunction:
     def __repr__(self):
         return f"<built-in function {self.__name__}>"
 
+    def __reduce__(self):
+        return self._func.__name__      # pickled by name, as builtin functions are
+
 
 _BuiltinFunction.__name__ = _BuiltinFunction.__qualname__ = "builtin_function_or_method"
 _BuiltinFunction.__module__ = "builtins"

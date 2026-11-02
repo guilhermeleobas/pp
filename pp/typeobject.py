@@ -185,7 +185,7 @@ class PyTypeObject:
 
 class _QualName(str):
     """A heap type's `__qualname__` carrying its PyTypeObject."""
-    __slots__ = ("view",)
+    __slots__ = ("view", "plain")       # `plain`: the str it replaced
 
 
 def _compute_tp_name(tp, flags) -> str:
@@ -359,8 +359,10 @@ def _new_view(tp) -> PyTypeObject:
     view = PyTypeObject(tp)
     stored = False
     if view.tp_flags & _MUTABLE_HEAP == Py_TPFLAGS_HEAPTYPE:
-        qualname = _QualName(_qualname_get(tp))
+        plain = _qualname_get(tp)
+        qualname = _QualName(plain)
         qualname.view = view
+        qualname.plain = plain
         try:
             _qualname_set(tp, qualname)
             stored = True
@@ -408,7 +410,7 @@ def PyType_Modified(tp) -> None:
     if _views.pop(id(tp), None) is None:
         qualname = _qualname_get(tp)
         if type(qualname) is _QualName:
-            _qualname_set(tp, str(qualname))
+            _qualname_set(tp, qualname.plain)
     for sub in _tp_subclasses(tp):
         PyType_Modified(sub)
 
@@ -1289,7 +1291,7 @@ def type_getattro(tp, name):
     the slot table as the `__qualname__` of a class (pickle would refuse it)."""
     res = _TYPE_GETATTRIBUTE(tp, name)
     if type(res) is _QualName:
-        return str(res)
+        return res.plain
     return res
 
 
