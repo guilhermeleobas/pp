@@ -19,7 +19,10 @@ def compile_source(source: str, filename: str = "<string>", mode: str = "exec") 
     return compile(source, filename, mode, dont_inherit=True)
 
 
-@dataclass(frozen=True, slots=True)
+# Not frozen: a frozen dataclass's __init__ sets each field through
+# object.__setattr__, about 4x slower to build, and every instruction of every
+# code object run is built once. Treat instances as immutable all the same.
+@dataclass(slots=True, unsafe_hash=True)
 class Instruction:
     offset: int
     opcode: int
@@ -68,26 +71,35 @@ def _jump_target(op: int, arg: int, offset: int, caches: int) -> int | None:
     return offset + 2 + arg * 2 + caches * 2
 
 
+_OPNAMES = tuple(_opcode.opname)
+_CACHES = tuple(_cache_size(name) for name in _OPNAMES)
+
+
 def _decode_instructions(raw: bytes) -> tuple:
     out = []
+    append = out.append
+    names = _OPNAMES
+    cache_sizes = _CACHES
+    hasarg = _HASARG
+    hasjump = _HASJUMP
     extended_arg = 0
     i = 0
     n = len(raw)
     while i < n:
         op = raw[i]
-        name = _opcode.opname[op]
-        caches = _cache_size(name)
-        if op in _HASARG:
+        caches = cache_sizes[op]
+        next_offset = i + 2 + 2 * caches
+        if op in hasarg:
             arg = raw[i + 1] | extended_arg
             extended_arg = (arg << 8) if op == _EXTENDED_ARG else 0
             if extended_arg >= _INT_OVERFLOW:
                 extended_arg -= 2 * _INT_OVERFLOW
+            target = _jump_target(op, arg, i, caches) if op in hasjump else None
         else:
             arg = None
             extended_arg = 0
-        next_offset = i + 2 + 2 * caches
-        target = _jump_target(op, arg, i, caches) if arg is not None else None
-        out.append(Instruction(i, op, name, arg, caches, next_offset, target))
+            target = None
+        append(Instruction(i, op, names[op], arg, caches, next_offset, target))
         i = next_offset
     return tuple(out)
 
