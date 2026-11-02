@@ -18,8 +18,9 @@ library written entirely in Python. The structure mirrors CPython so that
 CPython 3.15's behavior or source, CPython wins. Dynamo is secondary prior art
 only, consulted for ideas and edge cases, never as the authority.
 
-- **CPython 3.15** (a CPython checkout, branch `3.15`; read with
-  `git show <remote>/3.15:<path>`): `Python/bytecodes.c`
+- **CPython 3.15.2** (a CPython checkout at tag `v3.15.2`, the same tag as
+  the vendored `Lib/`; read with `git show v3.15.2:<path>`, never the working
+  tree, which may be on another version): `Python/bytecodes.c`
   (opcode semantics), `Python/ceval.c` (dispatch, exception unwinding, argument
   binding), `Python/intrinsics.c`, `Objects/genobject.c`, `Objects/funcobject.c`,
   `Objects/typeobject.c`, `Python/bltinmodule.c` (`__build_class__`, `super`),

@@ -6,7 +6,7 @@ A module counts as **pass** when its CPython test file runs to completion under 
 (`python -m pp run tools/run_unittest.py test.test_<module>`). The test file and every pure-Python module it
 imports run in the VM; C modules come from the host only if listed in `pp/importer.py`.
 
-Host C modules still borrowed: 16 temporary (to replace with Python), 17 permanent (host boundary).
+Host C modules still borrowed: 16 temporary (to replace with Python), 16 permanent (host boundary).
 
 Temporary: `_contextvars`, `_locale`, `_posixsubprocess`, `_random`, `_socket`, `_sre`, `_string`, `_struct`, `binascii`, `faulthandler`, `fcntl`, `math`, `resource`, `select`, `unicodedata`, `zlib`
 
@@ -14,16 +14,23 @@ Temporary: `_contextvars`, `_locale`, `_posixsubprocess`, `_random`, `_socket`, 
 
 | Result | Modules |
 |---|---|
-| partial | 27 |
-| pass | 11 |
-| fail | 9 |
+| partial | 26 |
+| pass | 12 |
+| fail | 6 |
 | timeout | 4 |
+| blocked | 3 |
 
 | Kind | Modules | What pp needs |
 |---|---|---|
 | Python | 30 | run the `.py` source through the VM |
 | Python + C helper | 18 | use its Python fallback if it has one, else reimplement the `_<name>` C helper |
 | C only | 3 | reimplement in Python under `pp/lib/` |
+
+## Top blockers
+
+| Missing | Modules blocked |
+|---|---|
+| `opcode GET_AWAITABLE is not implemented` | 3 |
 
 ## Modules
 
@@ -32,25 +39,25 @@ Temporary: `_contextvars`, `_locale`, `_posixsubprocess`, `_random`, `_socket`, 
 | 1 | operator | Python + C helper | test/test_operator.py | partial | `████░░░░░░` 43% 49/112 |  | FAILED (failures=1, errors=3, skipped=59) |
 | 1 | keyword | Python | test/test_keyword.py | pass | `██████████` 100% 11/11 |  |  |
 | 1 | types | Python + C helper | test/test_types.py | fail | — |  | ModuleNotFoundError: Standard library module '_datetime' was not found |
-| 1 | functools | Python + C helper | test/test_functools.py | partial | `██████░░░░` 58% 197/338 |  | FAILED (failures=10, errors=6, skipped=125) |
-| 1 | collections | Python + C helper | test/test_collections.py | fail | — |  | E |
+| 1 | functools | Python + C helper | test/test_functools.py | partial | `██████░░░░` 59% 200/338 |  | FAILED (failures=9, errors=4, skipped=125) |
+| 1 | collections | Python + C helper | test/test_collections.py | blocked | — |  | opcode GET_AWAITABLE is not implemented |
 | 1 | heapq | Python + C helper | test/test_heapq.py | partial | `█████░░░░░` 47% 33/69 |  | FAILED (failures=2, skipped=34) |
 | 1 | reprlib | Python | test/test_reprlib.py | partial | `█████████░` 90% 30/33 |  | FAILED (errors=1, skipped=2) |
 | 1 | copyreg | Python | test/test_copyreg.py | pass | `██████████` 100% 6/6 |  |  |
 | 1 | itertools | C only | test/test_itertools.py | timeout | — |  | >600s |
 | 2 | enum | Python | test/test_enum.py | partial | `██████████` 98% 1068/1087 |  | FAILED (failures=10, errors=5, skipped=4) |
-| 2 | contextlib | Python | test/test_contextlib.py | fail | — |  | E |
-| 2 | warnings | Python + C helper | test/test_warnings | partial | `██████░░░░` 58% 120/205 |  | FAILED (failures=64, errors=15, skipped=6) |
+| 2 | contextlib | Python | test/test_contextlib.py | blocked | — |  | opcode GET_AWAITABLE is not implemented |
+| 2 | warnings | Python + C helper | test/test_warnings | partial | `████████░░` 82% 170/205 |  | FAILED (failures=22, errors=7, skipped=6) |
 | 2 | weakref | Python + C helper | test/test_weakref.py | partial | `██████░░░░` 62% 87/140 | weak references never die and callbacks never fire (host objects; see pp/lib/_weakref.py) | FAILED (failures=49, errors=2, skipped=2) |
 | 2 | abc | Python + C helper | test/test_abc.py | pass | `██████████` 100% 76/76 |  |  |
 | 2 | string | Python + C helper | test/test_string | partial | `░░░░░░░░░░` 1% 1/55 |  | FAILED (errors=54) |
 | 2 | textwrap | Python | test/test_textwrap.py | pass | `██████████` 100% 68/68 |  |  |
 | 2 | fnmatch | Python | test/test_fnmatch.py | pass | `██████████` 100% 24/24 |  |  |
-| 3 | traceback | Python | test/test_traceback.py | partial | `██░░░░░░░░` 24% 106/441 |  | FAILED (failures=53, errors=149, skipped=133) |
+| 3 | traceback | Python | test/test_traceback.py | partial | `███░░░░░░░` 26% 116/441 |  | FAILED (failures=43, errors=149, skipped=133) |
 | 3 | difflib | Python | test/test_difflib.py | timeout | — |  | >600s |
 | 3 | pprint | Python | test/test_pprint.py | pass | `██████████` 100% 77/77 |  |  |
-| 3 | argparse | Python | test/test_argparse.py | partial | `██████████` 99% 1956/1963 |  | FAILED (failures=4, errors=2, skipped=1) |
-| 3 | unittest | Python | test/test_unittest | fail | — |  | E |
+| 3 | argparse | Python | test/test_argparse.py | partial | `██████████` 99% 1960/1963 |  | FAILED (errors=2, skipped=1) |
+| 3 | unittest | Python | test/test_unittest | blocked | — |  | opcode GET_AWAITABLE is not implemented |
 | 4 | bisect | Python + C helper | test/test_bisect.py | partial | `█████░░░░░` 50% 23/46 |  | FAILED (errors=23) |
 | 4 | colorsys | Python | test/test_colorsys.py | pass | `██████████` 100% 8/8 |  |  |
 | 4 | copy | Python | test/test_copy.py | partial | `█████████░` 94% 79/84 |  | FAILED (failures=4, errors=1) |
@@ -61,22 +68,22 @@ Temporary: `_contextvars`, `_locale`, `_posixsubprocess`, `_random`, `_socket`, 
 | 4 | statistics | Python + C helper | test/test_statistics.py | timeout | — |  | >600s |
 | 4 | shlex | Python | test/test_shlex.py | pass | `██████████` 100% 45/45 |  |  |
 | 4 | glob | Python | test/test_glob.py | partial | `█████████░` 90% 20/22 |  | OK (skipped=2) |
-| 4 | posixpath | Python | test/test_posixpath.py | partial | `█████████░` 92% 89/96 |  | FAILED (failures=2, skipped=5) |
-| 4 | tomllib | Python | test/test_tomllib | partial | `████████░░` 77% 14/18 |  | FAILED (failures=1, errors=3) |
-| 4 | base64 | Python | test/test_base64.py | partial | `██████████` 98% 66/67 |  | FAILED (failures=1) |
+| 4 | posixpath | Python | test/test_posixpath.py | partial | `█████████░` 93% 90/96 |  | FAILED (failures=1, skipped=5) |
+| 4 | tomllib | Python | test/test_tomllib | partial | `████████░░` 83% 15/18 |  | FAILED (errors=3) |
+| 4 | base64 | Python | test/test_base64.py | pass | `██████████` 100% 67/67 |  |  |
 | 4 | html | Python | test/test_html.py | pass | `██████████` 100% 2/2 |  |  |
 | 4 | csv | Python + C helper | test/test_csv.py | fail | — |  | ModuleNotFoundError: Standard library module '_csv' was not found |
-| 4 | ipaddress | Python | test/test_ipaddress.py | partial | `██████████` 96% 205/212 |  | FAILED (failures=1, errors=6) |
+| 4 | ipaddress | Python | test/test_ipaddress.py | partial | `██████████` 97% 206/212 |  | FAILED (errors=6) |
 | 4 | random | Python + C helper | test/test_random.py | partial | `█████████░` 86% 100/116 |  | FAILED (errors=14, skipped=2) |
 | 4 | typing | Python + C helper | test/test_typing.py | fail | — |  | TypeError: Parameters to Generic[...] must all be type variables or parameter specification variables. |
-| 4 | decimal | Python + C helper | test/test_decimal.py | fail | `░░░░░░░░░░` 0% 0/587 |  | FAILED (failures=433, skipped=203) |
+| 4 | decimal | Python + C helper | test/test_decimal.py | fail | `░░░░░░░░░░` 0% 0/587 |  | FAILED (failures=432, skipped=203) |
 | 4 | datetime | Python + C helper | test/test_datetime.py | timeout | — |  | >600s |
 | 4 | inspect | Python | test/test_inspect | fail | `░░░░░░░░░░` 0% 0/1 |  | FAILED (errors=1) |
 | 4 | dis | Python | test/test_dis.py | partial | `████████░░` 78% 114/145 |  | FAILED (failures=7, skipped=24) |
 | 4 | ast | Python + C helper | test/test_ast | partial | `██████████` 96% 213/220 |  | FAILED (failures=5, errors=1, skipped=1) |
 | 4 | queue | Python + C helper | test/test_queue.py | partial | `█████░░░░░` 46% 77/165 |  | FAILED (failures=1, skipped=87) |
-| 4 | calendar | Python | test/test_calendar.py | partial | `████████░░` 79% 68/86 |  | FAILED (failures=1, skipped=17) |
-| 4 | optparse | Python | test/test_optparse.py | partial | `██████████` 98% 152/155 |  | FAILED (failures=2, skipped=1) |
+| 4 | calendar | Python | test/test_calendar.py | partial | `████████░░` 80% 69/86 |  | OK (skipped=17) |
+| 4 | optparse | Python | test/test_optparse.py | partial | `██████████` 98% 153/155 |  | FAILED (failures=1, skipped=1) |
 | 4 | configparser | Python | test/test_configparser.py | partial | `██████████` 98% 378/383 |  | OK (skipped=5) |
-| 4 | array | C only | test/test_array.py | partial | `█████████░` 93% 1028/1098 |  | FAILED (failures=19, skipped=51) |
+| 4 | array | C only | test/test_array.py | partial | `█████████░` 93% 1030/1098 |  | FAILED (failures=17, skipped=51) |
 | 4 | gc | C only | test/test_gc.py | partial | `███░░░░░░░` 31% 19/61 | collect() frees nothing; object enumeration is empty (see pp/lib/gc.py) | FAILED (failures=33, errors=1, skipped=8) |

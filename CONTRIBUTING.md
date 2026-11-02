@@ -35,8 +35,9 @@ downloads CPython's `Lib/` at tag v3.15.2 into `vendor/`. Always use that tag.
 
 ## Ground rules
 
-- **CPython 3.15 is the ruler.** Behavior, error messages and structure
-  follow CPython (`Python/ceval.c`, `Objects/typeobject.c`,
+- **CPython 3.15.2 is the ruler.** Read sources at the `v3.15.2` tag
+  (`git show v3.15.2:<path>` in a CPython checkout), not a working tree on
+  another version. Behavior, error messages and structure follow CPython (`Python/ceval.c`, `Objects/typeobject.c`,
   `Objects/abstract.c`, `Modules/*.c`, ...). Mirror CPython's names and
   structures, but add a slot or a field only when something reads it.
 - **Host boundary.** The VM (`pp/*.py`) is host code. It may import only the
