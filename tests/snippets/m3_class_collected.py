@@ -17,3 +17,17 @@ def mk2():
         def __len__(self): return 3
     return weakref.ref(C), len(C())
 r, n = mk2(); gc.collect(); print(r() is None, n)
+# Protocol subclasses and classes defined with type() are collected as well
+import typing
+def mk3(base):
+    class K(base):
+        def f(self): return super().f()
+    class B(base):
+        def f(self): return 1
+    K().f
+    T = type("T", (), {"f": lambda self: 2})
+    T().f()
+    return weakref.ref(K), weakref.ref(T)
+class Proto(typing.Protocol):
+    def f(self): ...
+a, t = mk3(Proto); gc.collect(); print(a() is None, t() is None)

@@ -8,7 +8,6 @@ from pp.bytecode import compile_source
 from pp.frame import NULL
 from pp.funcobject import Function
 from pp.object import PyObject_SetAttr
-from pp.typeobject import PyType_View
 
 _host_super = _host_builtins.super
 _MISSING = object()
@@ -42,6 +41,10 @@ class _BuiltinFunction:
 
     def __repr__(self):
         return f"<built-in function {self.__name__}>"
+
+
+_BuiltinFunction.__name__ = _BuiltinFunction.__qualname__ = "builtin_function_or_method"
+_BuiltinFunction.__module__ = "builtins"
 
 
 def make_builtins(vm) -> types.ModuleType:
@@ -89,8 +92,6 @@ def make_builtins(vm) -> types.ModuleType:
         if bases is not orig_bases:
             namespace["__orig_bases__"] = orig_bases
         cls = vm.call(meta, (name, bases, namespace), kwds)
-        if isinstance(cls, type):
-            PyType_View(cls)
         if isinstance(cls, type) and isinstance(cell, types.CellType):
             try:
                 cell_cls = cell.cell_contents

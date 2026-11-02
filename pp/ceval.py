@@ -40,7 +40,6 @@ from pp.genobject import PyAsyncGenObject, PyCoroObject, PyGenObject
 
 _GenericGetAttr = _obj.PyObject_GenericGetAttr
 _GenericSetAttr = _obj.PyObject_GenericSetAttr
-_UNSET = _typeobject._UNSET
 _object_getattribute = _typeobject._object_getattribute
 DICT_STD = _typeobject.DICT_STD
 DICT_NONE = _typeobject.DICT_NONE
@@ -1086,7 +1085,7 @@ class VirtualMachine:
             tp = type(owner)
             msg = _SPECIAL_ERRORS[name].format(_type_fullname(tp))
             other, suggestion = _SPECIAL_SUGGEST[name]
-            if _PyType_Lookup(Py_TYPE(owner), other) is not NULL:
+            if _PyType_Lookup(type(owner), other) is not NULL:
                 msg += suggestion
             raise TypeError(msg)
         method, self_or_null = found
@@ -1362,8 +1361,8 @@ class VirtualMachine:
             if view.tp_getattro is _GenericGetAttr:
                 # _PyObject_GetMethod for the common case: a plain function or a C
                 # method descriptor in the type, not shadowed by the instance dict.
-                descr = view.tp_cache.get(name, _UNSET)
-                if descr is not _UNSET and (type(descr) is Function or type(descr) is _MethodDescriptorType):
+                descr = _PyType_Lookup(type(owner), name)
+                if type(descr) is Function or type(descr) is _MethodDescriptorType:
                     kind = view.tp_dictkind
                     if kind == DICT_NONE or (kind == DICT_STD and name not in owner.__dict__):
                         f.stack.append(descr)
@@ -1380,8 +1379,7 @@ class VirtualMachine:
                 if view.tp_dictkind == DICT_STD:
                     # An instance attribute of a plain object: nothing in the type
                     # (not even a non-data descriptor) shadows it.
-                    descr = view.tp_cache.get(name, _UNSET)
-                    if descr is NULL:
+                    if _PyType_Lookup(type(owner), name) is NULL:
                         res = owner.__dict__.get(name, NULL)
                         if res is not NULL:
                             f.stack.append(res)
@@ -1398,10 +1396,7 @@ class VirtualMachine:
         if view.tp_setattro is _GenericSetAttr and view.tp_getattro is _GenericGetAttr \
                 and view.tp_dictkind == DICT_STD:
             # PyObject_GenericSetAttr for a plain instance: no descriptor in the way.
-            descr = view.tp_cache.get(name, _UNSET)
-            if descr is _UNSET:
-                descr = _PyType_Lookup(view, name)
-            if descr is NULL:
+            if _PyType_Lookup(type(owner), name) is NULL:
                 _dict_setitem(owner.__dict__, name, v)
                 return
         PyObject_SetAttr(owner, name, v)

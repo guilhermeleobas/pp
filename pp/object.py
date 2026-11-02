@@ -12,9 +12,9 @@ from pp.errors import _PyErr_Clear, _PyThreadState_GET
 from pp.frame import NULL
 from pp.typeobject import (Py_TPFLAGS_METHOD_DESCRIPTOR, Py_TYPE, PyObject_TypeCheck,
                            PyType_Check, PyType_IsSubtype, PyType_View, _PyObject_GetDictPtr,
-                           _PyType_Lookup, _PyObject_GenericGetDict, DICT_NONE, DICT_STD,
+                           _PyType_Lookup, DICT_NONE, DICT_SPECIAL, DICT_STD,
                            _tp_dict, _type_dictget, _views_get, _object_getattribute,
-                           _new_view, _UNSET,
+                           _new_view, _object_setattr, _object_delattr,
                            register_wrapper_slot, update_slot)
 
 Py_LT, Py_LE, Py_EQ, Py_NE, Py_GT, Py_GE = range(6)
@@ -124,7 +124,7 @@ def _PyObject_GenericGetAttrWithDict(obj, name, dict_, suppress):
     if not PyUnicode_Check(name):
         raise _name_error(name)
 
-    descr = _PyType_Lookup(tp, name)
+    descr = _PyType_Lookup(type(obj), name)
     f = None
     if descr is not NULL:
         descr_type = Py_TYPE(descr)
@@ -165,13 +165,12 @@ def _call_descr_get(f, descr, obj, tp, suppress):
 def PyObject_GenericGetAttr(obj, name):
     # _PyObject_GenericGetAttrWithDict(obj, name, NULL, 0), flattened: this is the
     # one function every attribute load of an ordinary object goes through.
-    tp = _views_get(id(type(obj))) or Py_TYPE(obj)
+    cls = type(obj)
+    tp = _views_get(id(cls)) or Py_TYPE(obj)
     if type(name) is not str and not PyUnicode_Check(name):
         raise _name_error(name)
 
-    descr = tp.tp_cache.get(name, _UNSET)        # _PyType_Lookup(tp, name)
-    if descr is _UNSET:
-        descr = _PyType_Lookup(tp, name)
+    descr = _PyType_Lookup(cls, name)
     f = None
     if descr is not NULL:
         descr_type = _views_get(id(type(descr))) or Py_TYPE(descr)
@@ -184,7 +183,7 @@ def PyObject_GenericGetAttr(obj, name):
     elif kind == DICT_NONE:
         dict_ = None
     else:
-        dict_ = _PyObject_GenericGetDict(obj)
+        dict_ = _PyObject_GetDictPtr(obj, tp)
     if dict_ is not None:
         res = _dict_get(dict_, name, NULL)
         if res is not NULL:
@@ -201,12 +200,20 @@ def _PyObject_GenericSetAttrWithDict(obj, name, value, dict_):
     tp = Py_TYPE(obj)
     if not PyUnicode_Check(name):
         raise _name_error(name)
-    descr = _PyType_Lookup(tp, name)
+    descr = _PyType_Lookup(type(obj), name)
     if descr is not NULL:
         f = Py_TYPE(descr).tp_descr_set
         if f is not None:
             f(descr, obj, value)
             return
+    if dict_ is NULL and tp.tp_dictkind == DICT_SPECIAL:
+        # The dict is at tp_dictoffset although `__dict__` means something else to
+        # the class, and it may not exist yet: let the host create and use it.
+        if value is NULL:
+            _object_delattr(obj, name)
+        else:
+            _object_setattr(obj, name, value)
+        return
     if dict_ is NULL:
         dict_ = _PyObject_GetDict(obj, tp)
         if dict_ is None:
@@ -234,13 +241,12 @@ def PyObject_GenericSetAttr(obj, name, value):
 def _PyObject_GetMethod(obj, name):
     """-> (value, meth_found). With meth_found true, `value` is an unbound method
     to call with `obj` as the first argument."""
-    tp = _views_get(id(type(obj))) or Py_TYPE(obj)
+    cls = type(obj)
+    tp = _views_get(id(cls)) or Py_TYPE(obj)
     if tp.tp_getattro is not PyObject_GenericGetAttr or type(name) is not str:
         return PyObject_GetAttr(obj, name), False
 
-    descr = tp.tp_cache.get(name, _UNSET)        # _PyType_Lookup(tp, name)
-    if descr is _UNSET:
-        descr = _PyType_Lookup(tp, name)
+    descr = _PyType_Lookup(cls, name)
     f = None
     meth_found = False
     if descr is not NULL:
@@ -257,7 +263,7 @@ def _PyObject_GetMethod(obj, name):
     elif kind == DICT_NONE:
         dict_ = None
     else:
-        dict_ = _PyObject_GenericGetDict(obj)
+        dict_ = _PyObject_GetDictPtr(obj, tp)
     if dict_ is not None:
         attr = _dict_get(dict_, name, NULL)
         if attr is not NULL:
@@ -275,8 +281,7 @@ def _PyObject_GetMethod(obj, name):
 def _PyObject_LookupSpecialMethod(name, owner):
     """LOAD_SPECIAL's lookup -> (method, self_or_NULL), or None if the type has no
     such special method."""
-    tp = Py_TYPE(owner)
-    method = _PyType_Lookup(tp, name)
+    method = _PyType_Lookup(type(owner), name)
     if method is NULL:
         return None
     mt = Py_TYPE(method)
@@ -370,8 +375,7 @@ def _is_positive(res) -> bool:
 # --- isinstance ----------------------------------------------------------------
 
 def _PyObject_LookupSpecial(self, name):
-    tp = Py_TYPE(self)
-    res = _PyType_Lookup(tp, name)
+    res = _PyType_Lookup(type(self), name)
     if res is not NULL:
         f = Py_TYPE(res).tp_descr_get
         if f is not None:
