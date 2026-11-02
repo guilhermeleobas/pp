@@ -46,3 +46,13 @@ same branch · `REJECT`: branch dropped, task re-briefed (possibly on Opus).
   clone at `~/git/pp`. Use it for CPU-heavy gate runs and independent tasks.
   Remote sessions push their branch (`impl/<task>`, `test/<task>`) to GitHub;
   the orchestrator fetches and merges it like a local branch.
+
+## Budget
+
+The user's Claude quota is shared with other work, so keep usage modest:
+
+- At most two agents running at once; Sonnet by default. Opus only for the
+  reviewer and judge, with compact briefs and capped finding counts.
+- Prefer one combined reviewer+judge pass for small changes.
+- Check usage between tasks; above ~50% of the session limit, pause new work
+  and ask the user.
