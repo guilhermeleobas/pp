@@ -7,10 +7,12 @@ their death, so
   * a weak reference keeps its referent alive (it is a strong reference);
   * a reference never becomes dead by itself: ``ref()`` always returns the
     referent, proxies never raise ReferenceError, and callbacks never fire;
-  * created references are remembered (strongly) by the module so that
-    ``getweakrefcount``/``getweakrefs`` and the sharing of the basic ``ref`` and
-    ``proxy`` of an object match CPython; they are never released, so
-    everything that was ever weakly referenced stays alive.
+  * a ref holds its referent only for as long as the ref itself lives:
+    ``weakref.ref(C())`` frees the object immediately, finalizers included;
+  * ``getweakrefcount`` counts live refs (per-object count kept by id and
+    dropped with the last ref), but the refs themselves are not kept, so
+    ``getweakrefs`` always returns ``[]`` and ``ref(o) is ref(o)`` is False
+    (CPython shares the basic ref of an object).
 
 Kept from CPython: ``ref`` hash is the referent's hash and equality compares
 referents, ``ref`` is subclassable, ``__callback__``, repr, ``ref[int]``, and
@@ -25,67 +27,60 @@ import operator as _operator
 
 _GenericAlias = type(list[int])
 
-# id(obj) -> (obj, [refs]); CPython keeps the same list on the object itself:
-# basic ref first, then basic proxy, then the others, newest first.
-_registry = {}
+# id(obj) -> number of live refs/proxies. Only the count is kept (never the
+# refs or the referent), so nothing is pinned beyond what each live ref holds;
+# the entry goes away when the last ref is dropped (``__del__``).
+_counts = {}
 
 
 def _fq(tp):
+    """Fully qualified type name, as ``%T`` / ``PyType_GetFullyQualifiedName``."""
     mod = tp.__module__
-    if mod == "builtins" or mod is None:
+    if mod == "builtins" or mod == "__main__" or mod is None:
         return tp.__qualname__
     return f"{mod}.{tp.__qualname__}"
 
 
+_HEAPTYPE = 1 << 9
+
+
+def _tp_name(tp):
+    """``tp_name``: ``__name__`` for heap types, ``module.name`` for static ones."""
+    if tp.__flags__ & _HEAPTYPE:
+        return tp.__name__
+    mod = tp.__module__
+    if mod == "builtins" or mod is None:
+        return tp.__name__
+    return f"{mod}.{tp.__name__}"
+
+
 def _check_weakrefable(ob):
     if type(ob).__weakrefoffset__ == 0:
-        raise TypeError(f"cannot create weak reference to '{_fq(type(ob))}' object")
+        raise TypeError(f"cannot create weak reference to '{_tp_name(type(ob))}' object")
 
 
-_cbof = lambda r: object.__getattribute__(r, "_cb")
+def _incr(ob):
+    k = id(ob)
+    _counts[k] = _counts.get(k, 0) + 1
 
 
-def _is_basic(r):
-    return _cbof(r) is None and (type(r) is ReferenceType or type(r) is ProxyType
-                              or type(r) is CallableProxyType)
-
-
-def _insert(ob, wr):
-    ent = _registry.get(id(ob))
-    if ent is None:
-        _registry[id(ob)] = (ob, [wr])
+def _decr(wr, _counts=_counts, _get=object.__getattribute__):
+    try:
+        k = id(_get(wr, "_o"))
+    except AttributeError:
         return
-    lst = ent[1]
-    if _cbof(wr) is None and type(wr) is ReferenceType:
-        lst.insert(0, wr)
-    elif type(wr) is not ReferenceType and _is_basic(wr):
-        first_is_ref = bool(lst) and type(lst[0]) is ReferenceType and _cbof(lst[0]) is None
-        lst.insert(1 if first_is_ref else 0, wr)
+    n = _counts.get(k, 0) - 1
+    if n > 0:
+        _counts[k] = n
     else:
-        n = 0
-        for r in lst:
-            if not _is_basic(r):
-                break
-            n += 1
-        lst.insert(n, wr)
+        _counts.pop(k, None)
 
 
-def _basic(ob, kind):
-    ent = _registry.get(id(ob))
-    if ent is not None:
-        for r in ent[1]:
-            if type(r) is kind and _cbof(r) is None:
-                return r
-    return None
-
-
-def _parse_args(name, args):
-    n = len(args)
+def _check_args(name, n):
     if n < 1:
         raise TypeError(f"{name} expected at least 1 argument, got {n}")
     if n > 2:
         raise TypeError(f"{name} expected at most 2 arguments, got {n}")
-    return args[0], (args[1] if n > 1 else None)
 
 
 def _special(obj, name):
@@ -106,23 +101,24 @@ Here the reference is strong and never dies (see the module docstring)."""
     __slots__ = ("_o", "_cb", "_h")
 
     def __new__(cls, *args, **kwargs):
-        ob, callback = _parse_args("__new__", args)
+        _check_args("__new__", len(args))
+        ob = args[0]
+        callback = args[1] if len(args) > 1 else None
         _check_weakrefable(ob)
-        if callback is None and cls is ReferenceType:
-            r = _basic(ob, ReferenceType)
-            if r is not None:
-                return r
         self = object.__new__(cls)
         self._o = ob
         self._cb = callback
         self._h = None
-        _insert(ob, self)
+        _incr(ob)
         return self
+
+    def __del__(self, _decr=_decr):
+        _decr(self)
 
     def __init__(self, *args, **kwargs):
         if kwargs:
             raise TypeError("ref() takes no keyword arguments")
-        _parse_args("__init__", args)
+        _check_args("__init__", len(args))
 
     @property
     def __callback__(self):
@@ -181,6 +177,9 @@ class ProxyType:
     def __new__(cls, *args, **kwargs):
         raise TypeError(f"cannot create '{cls.__module__}.{cls.__name__}' instances")
 
+    def __del__(self, _decr=_decr):
+        _decr(self)
+
     def __init_subclass__(cls, **kwargs):
         raise TypeError("type 'weakref.ProxyType' is not an acceptable base type")
 
@@ -203,7 +202,8 @@ class ProxyType:
     def __bytes__(self):
         return bytes(_obj(self))
 
-    __hash__ = None
+    def __hash__(self):
+        raise TypeError("unhashable type: 'weakref.ProxyType'")
 
     def __bool__(self):
         return bool(_obj(self))
@@ -444,6 +444,9 @@ class CallableProxyType:
     def __new__(cls, *args, **kwargs):
         raise TypeError(f"cannot create '{cls.__module__}.{cls.__name__}' instances")
 
+    def __del__(self, _decr=_decr):
+        _decr(self)
+
     def __init_subclass__(cls, **kwargs):
         raise TypeError("type 'weakref.CallableProxyType' is not an acceptable base type")
 
@@ -466,7 +469,8 @@ class CallableProxyType:
     def __bytes__(self):
         return bytes(_obj(self))
 
-    __hash__ = None
+    def __hash__(self):
+        raise TypeError("unhashable type: 'weakref.CallableProxyType'")
 
     def __bool__(self):
         return bool(_obj(self))
@@ -705,15 +709,18 @@ CallableProxyType.__module__ = "weakref"
 
 
 def getweakrefcount(object, /):
-    """Return the number of weak references to 'object'."""
-    ent = _registry.get(id(object))
-    return 0 if ent is None else len(ent[1])
+    """Return the number of weak references to 'object'.
+
+Counts the references that are still alive (not dropped)."""
+    return _counts.get(id(object), 0)
 
 
 def getweakrefs(object, /):
-    """Return a list of all weak reference and proxy objects that refer to 'object'."""
-    ent = _registry.get(id(object))
-    return [] if ent is None else list(ent[1])
+    """Return a list of all weak reference and proxy objects that refer to 'object'.
+
+Always empty here: the module does not keep the references (that would pin
+them and their referent forever), so it cannot hand them back."""
+    return []
 
 
 def proxy(object, callback=None, /):
@@ -723,14 +730,10 @@ def proxy(object, callback=None, /):
 is about to be finalized (never, here)."""
     _check_weakrefable(object)
     kind = CallableProxyType if callable(object) else ProxyType
-    if callback is None:
-        r = _basic(object, kind)
-        if r is not None:
-            return r
     p = _new(kind)
     _setattr(p, "_o", object)
     _setattr(p, "_cb", callback)
-    _insert(object, p)
+    _incr(object)
     return p
 
 

@@ -96,7 +96,9 @@ def _unpack_bits(bits, ebits, mbits):
 
 
 def _as_double(v):
-    if type(v) is float or type(v) is int:
+    if type(v) is float:
+        return v
+    if type(v) is int:
         return float(v)
     t = type(v)
     f = getattr(t, "__float__", None)
@@ -109,7 +111,7 @@ def _as_double(v):
     f = getattr(t, "__index__", None)
     if f is not None:
         return float(f(v))
-    raise TypeError("array item must be float")
+    raise TypeError(f"must be real number, not {t.__name__}")
 
 
 def _as_complex(v):
@@ -123,104 +125,209 @@ def _as_complex(v):
             raise TypeError(f"{t.__name__}.__complex__ returned non-complex "
                             f"(type {type(r).__name__})")
         return r.real, r.imag
-    try:
-        return _as_double(v), 0.0
-    except TypeError:
-        raise TypeError("array item must be complex") from None
+    return _as_double(v), 0.0
 
 
-# ---------------------------------------------------------------------------
-# Item codecs. enc(value) -> bytes (raises on bad values); dec(buf, offset).
-
-def _to_int(v, msg="array item must be integer"):
+def _index(v):
     if type(v) is int:
         return v
     f = getattr(type(v), "__index__", None)
     if f is None:
-        raise TypeError(msg)
+        raise TypeError(f"'{type(v).__name__}' object cannot be interpreted "
+                        "as an integer")
     r = f(v)
-    if not isinstance(r, int):
-        raise TypeError(f"__index__ returned non-int (type {type(r).__name__})")
-    return int(r)
+    if type(r) is not int:
+        if not isinstance(r, int):
+            raise TypeError(f"__index__ returned non-int (type {type(r).__name__})")
+        r = int(r)
+    return r
 
 
-def _int_codec(size, signed, lo_msg, hi_msg, neg_msg=None):
+# ---------------------------------------------------------------------------
+# Item codecs.
+#   enc(value) -> bytes (raises on bad values)        dec(buf, offset) -> value
+#   enc_many(list) -> bytes (all or nothing)          dec_many(buf) -> list
+# The *_many forms run as host builtins over whole lists (map/join/tolist), so
+# bulk operations do not execute bytecode per item; any value the fast path
+# does not accept goes through enc() for the exact CPython error.
+#
+# memoryview.cast gives the native-format pack/unpack of the host. It is used
+# for 'f', 'd', 'Zf', 'Zd' (and for decoding every format in bulk); the
+# pure-Python IEEE codec above handles 'e', the float32 overflow case and
+# _array_reconstructor.
+
+_INT_ONLY = {int}
+_FLOAT_OK = {float, int}
+
+
+def _tolist_fmt(buf, fmt):
+    if not buf:
+        return []
+    m1 = memoryview(buf)
+    m2 = m1.cast(fmt)
+    try:
+        return m2.tolist()
+    finally:
+        m2.release()
+        m1.release()
+
+
+def _get_fmt(buf, off, size, fmt):
+    m1 = memoryview(buf)
+    m2 = m1[off:off + size]
+    m3 = m2.cast(fmt)
+    try:
+        return m3.tolist()
+    finally:
+        m3.release()
+        m2.release()
+        m1.release()
+
+
+def _pack_fmt(values, size, fmt):
+    ba = bytearray(size * len(values))
+    m1 = memoryview(ba)
+    m2 = m1.cast(fmt)
+    try:
+        list(map(m2.__setitem__, range(len(values)), values))
+    finally:
+        m2.release()
+        m1.release()
+    return bytes(ba)
+
+
+_LONGMSG = "Python int too large to convert to C long"
+_LONG_RANGE = (-(1 << 63), (1 << 63) - 1, _LONGMSG, _LONGMSG)
+_ULONG_RANGE = (0, (1 << 64) - 1, "can't convert negative value to unsigned int",
+                "Python int too large to convert to C unsigned long")
+
+
+def _range(lo, hi, what):
+    return (lo, hi, f"{what} is less than minimum", f"{what} is greater than maximum")
+
+
+def _int_codec(size, signed, stages, fmt):
     lo = -(1 << (8 * size - 1)) if signed else 0
     hi = (1 << (8 * size - 1)) - 1 if signed else (1 << (8 * size)) - 1
+    mask = (1 << (8 * size)) - 1
     bo = _BO
     from_bytes = int.from_bytes
+    to_bytes = int.to_bytes
+    andmask = mask.__and__
+    stages = tuple(stages)
 
-    if signed:
-        def enc(v):
-            v = _to_int(v)
-            if v < lo:
-                raise OverflowError(lo_msg)
-            if v > hi:
-                raise OverflowError(hi_msg)
-            return v.to_bytes(size, bo, signed=True)
-    elif neg_msg is not None:
-        def enc(v):
-            v = _to_int(v, f"'{type(v).__name__}' object cannot be interpreted "
-                           "as an integer")
-            if v < 0:
-                raise OverflowError(neg_msg)
-            if v > hi:
-                raise OverflowError(hi_msg)
-            return v.to_bytes(size, bo)
-    else:
-        def enc(v):
-            v = _to_int(v)
-            if v < lo:
-                raise OverflowError(lo_msg)
-            if v > hi:
-                raise OverflowError(hi_msg)
-            return v.to_bytes(size, bo)
+    def enc(v):
+        v = _index(v)
+        for slo, shi, lmsg, hmsg in stages:
+            if v < slo:
+                raise OverflowError(lmsg)
+            if v > shi:
+                raise OverflowError(hmsg)
+        return (v & mask).to_bytes(size, bo)
 
     def dec(buf, off):
         return from_bytes(buf[off:off + size], bo, signed=signed)
-    return enc, dec
+
+    def enc_many(vals):
+        n = len(vals)
+        if n == 0:
+            return b""
+        if set(map(type, vals)) <= _INT_ONLY and min(vals) >= lo and max(vals) <= hi:
+            if signed:
+                vals = list(map(andmask, vals))
+            if size == 1:
+                return bytes(vals)
+            return b"".join(map(to_bytes, vals, [size] * n, [bo] * n))
+        return b"".join(map(enc, vals))
+
+    def dec_many(buf):
+        return _tolist_fmt(buf, fmt)
+    return enc, dec, enc_many, dec_many
 
 
-def _float_codec(size, ebits, mbits, via_float32=False):
+def _slow_float_codec(size, ebits, mbits, fmt, via_float32=False):
+    """'e': pure-Python IEEE binary16 pack (memoryview 'e' rounds differently
+    from CPython's float-then-half path), memoryview decode."""
     bo = _BO
-    from_bytes = int.from_bytes
 
-    if via_float32:
-        # 'e': the value is first parsed as a C float, then packed as binary16.
-        def enc(v):
-            x = _unpack_bits(_pack_bits(_as_double(v), 8, 23), 8, 23)
-            return _pack_bits(x, ebits, mbits, True).to_bytes(size, bo)
-    else:
-        def enc(v):
-            return _pack_bits(_as_double(v), ebits, mbits).to_bytes(size, bo)
+    def enc(v):
+        x = _unpack_bits(_pack_bits(_as_double(v), 8, 23), 8, 23)
+        return _pack_bits(x, ebits, mbits, True).to_bytes(size, bo)
 
     def dec(buf, off):
-        return _unpack_bits(from_bytes(buf[off:off + size], bo), ebits, mbits)
-    return enc, dec
+        return _get_fmt(buf, off, size, fmt)[0]
+
+    def enc_many(vals):
+        return b"".join(map(enc, vals))
+
+    def dec_many(buf):
+        return _tolist_fmt(buf, fmt)
+    return enc, dec, enc_many, dec_many
 
 
-def _complex_codec(half, ebits, mbits):
+def _float_codec(size, ebits, mbits, fmt):
+    """'f' and 'd' packed by memoryview.cast (native layout)."""
     bo = _BO
-    from_bytes = int.from_bytes
-    swap = _LITTLE
+    f32 = size == 4
+
+    def enc(v):
+        x = _as_double(v)
+        try:
+            return _pack_fmt((x,), size, fmt)
+        except OverflowError:
+            if not f32:
+                raise
+            return _pack_bits(x, ebits, mbits).to_bytes(size, bo)
+
+    def dec(buf, off):
+        return _get_fmt(buf, off, size, fmt)[0]
+
+    def enc_many(vals):
+        if len(vals) == 0:
+            return b""
+        if set(map(type, vals)) <= _FLOAT_OK:
+            try:
+                return _pack_fmt(vals, size, fmt)
+            except (OverflowError, ValueError):
+                pass
+        return b"".join(map(enc, vals))
+
+    def dec_many(buf):
+        return _tolist_fmt(buf, fmt)
+    return enc, dec, enc_many, dec_many
+
+
+def _complex_codec(half, ebits, mbits, fmt):
+    bo = _BO
+    f32 = half == 4
 
     def enc(v):
         re, im = _as_complex(v)
-        a = _pack_bits(re, ebits, mbits).to_bytes(half, bo)
-        b = _pack_bits(im, ebits, mbits).to_bytes(half, bo)
-        return a + b
+        try:
+            return _pack_fmt((re, im), half, fmt)
+        except OverflowError:
+            if not f32:
+                raise
+            return (_pack_bits(re, ebits, mbits).to_bytes(half, bo)
+                    + _pack_bits(im, ebits, mbits).to_bytes(half, bo))
 
     def dec(buf, off):
-        return complex(
-            _unpack_bits(from_bytes(buf[off:off + half], bo), ebits, mbits),
-            _unpack_bits(from_bytes(buf[off + half:off + 2 * half], bo),
-                         ebits, mbits))
-    return enc, dec
+        re, im = _get_fmt(buf, off, 2 * half, fmt)
+        return complex(re, im)
+
+    def enc_many(vals):
+        return b"".join(map(enc, vals))
+
+    def dec_many(buf):
+        flat = _tolist_fmt(buf, fmt)
+        return list(map(complex, flat[0::2], flat[1::2]))
+    return enc, dec, enc_many, dec_many
 
 
-def _unicode_codec(name):
+def _unicode_codec():
     bo = _BO
     from_bytes = int.from_bytes
+    to_bytes = int.to_bytes
 
     def enc(v):
         if not isinstance(v, str):
@@ -233,18 +340,29 @@ def _unicode_codec(name):
 
     def dec(buf, off):
         return chr(from_bytes(buf[off:off + 4], bo))
-    return enc, dec
+
+    def enc_many(vals):
+        return b"".join(map(enc, vals))
+
+    def dec_many(buf):
+        return list(map(chr, _tolist_fmt(buf, "I")))
+
+    def enc_str(s):
+        n = len(s)
+        return b"".join(map(to_bytes, map(ord, s), [4] * n, [bo] * n))
+    return enc, dec, enc_many, dec_many, enc_str
 
 
 class _Desc:
-    __slots__ = ("typecode", "itemsize", "enc", "dec", "integer", "signed",
-                 "mformat")
+    __slots__ = ("typecode", "itemsize", "enc", "dec", "enc_many", "dec_many",
+                 "enc_str", "integer", "signed", "mformat")
 
     def __init__(self, typecode, itemsize, codec, integer=False, signed=False,
                  mformat=-1):
         self.typecode = typecode
         self.itemsize = itemsize
-        self.enc, self.dec = codec
+        self.enc, self.dec, self.enc_many, self.dec_many = codec[:4]
+        self.enc_str = codec[4] if len(codec) > 4 else None
         self.integer = integer
         self.signed = signed
         self.mformat = mformat
@@ -255,58 +373,56 @@ _BE = 0 if _LITTLE else 1
 
 
 def _int_mformat(size, signed):
-    base = {1: 0, 2: 2, 4: 6, 8: 10}[size]
     if size == 1:
         return 1 if signed else 0
+    base = {2: 2, 4: 6, 8: 10}[size]
     return base + _BE + (2 if signed else 0)
 
 
-def _int_desc(code, size, signed, lo_msg, hi_msg, neg_msg=None):
-    return _Desc(code, size, _int_codec(size, signed, lo_msg, hi_msg, neg_msg),
+def _int_desc(code, size, signed, stages, fmt):
+    return _Desc(code, size, _int_codec(size, signed, stages, fmt),
                  True, signed, _int_mformat(size, signed))
 
 
+_SHORT = _range(-(1 << 15), (1 << 15) - 1, "signed short integer")
+_INTR = _range(-(1 << 31), (1 << 31) - 1, "signed integer")
+_LONGR = _LONG_RANGE if _LONG == 8 else (-(1 << 31), (1 << 31) - 1, _LONGMSG, _LONGMSG)
+_ULONGR = _ULONG_RANGE if _LONG == 8 else (0, (1 << 32) - 1, _ULONG_RANGE[2], _ULONG_RANGE[3])
+_LFMT = "l" if _LONG == 8 else "i"
+
 _DESCRIPTORS = (
-    _int_desc("b", 1, True, "signed char is less than minimum",
-              "signed char is greater than maximum"),
-    _int_desc("B", 1, False, "unsigned byte integer is less than minimum",
-              "unsigned byte integer is greater than maximum"),
-    _Desc("u", 4, _unicode_codec("u"), mformat=20 + _BE),
-    _Desc("w", 4, _unicode_codec("w"), mformat=20 + _BE),
-    _int_desc("h", 2, True, "signed short integer is less than minimum",
-              "signed short integer is greater than maximum"),
-    _int_desc("H", 2, False, "unsigned short is less than minimum",
-              "unsigned short is greater than maximum"),
-    _int_desc("i", 4, True, "signed integer is less than minimum",
-              "signed integer is greater than maximum"),
-    _int_desc("I", 4, False, "unsigned int is less than minimum",
-              "unsigned int is greater than maximum",
-              "can't convert negative value to unsigned int"),
-    _int_desc("l", _LONG, True, "Python int too large to convert to C long",
-              "Python int too large to convert to C long"),
-    _int_desc("L", _LONG, False, "can't convert negative value to unsigned int",
-              "Python int too large to convert to C unsigned long",
-              "can't convert negative value to unsigned int"),
-    _int_desc("q", 8, True, "int too big to convert", "int too big to convert"),
-    _int_desc("Q", 8, False, "can't convert negative value to unsigned int",
-              "int too big to convert",
-              "can't convert negative value to unsigned int"),
-    _Desc("e", 2, _float_codec(2, 5, 10, True), mformat=26 + _BE),
-    _Desc("f", 4, _float_codec(4, 8, 23), mformat=14 + _BE),
-    _Desc("d", 8, _float_codec(8, 11, 52), mformat=16 + _BE),
-    _Desc("Zf", 8, _complex_codec(4, 8, 23), mformat=22 + _BE),
-    _Desc("Zd", 16, _complex_codec(8, 11, 52), mformat=24 + _BE),
+    _int_desc("b", 1, True, [_LONG_RANGE, _SHORT,
+                             _range(-128, 127, "signed char")], "b"),
+    _int_desc("B", 1, False, [_LONG_RANGE,
+                              _range(0, 255, "unsigned byte integer")], "B"),
+    _Desc("u", 4, _unicode_codec(), mformat=20 + _BE),
+    _Desc("w", 4, _unicode_codec(), mformat=20 + _BE),
+    _int_desc("h", 2, True, [_LONG_RANGE, _SHORT], "h"),
+    _int_desc("H", 2, False, [_LONG_RANGE, _INTR,
+                              _range(0, 65535, "unsigned short")], "H"),
+    _int_desc("i", 4, True, [_LONG_RANGE, _INTR], "i"),
+    _int_desc("I", 4, False, [_ULONG_RANGE,
+                              _range(0, (1 << 32) - 1, "unsigned int")], "I"),
+    _int_desc("l", _LONG, True, [_LONGR], _LFMT),
+    _int_desc("L", _LONG, False, [_ULONGR], _LFMT.upper()),
+    _int_desc("q", 8, True, [(-(1 << 63), (1 << 63) - 1, "int too big to convert",
+                              "int too big to convert")], "q"),
+    _int_desc("Q", 8, False, [(0, (1 << 64) - 1,
+                               "can't convert negative int to unsigned",
+                               "int too big to convert")], "Q"),
+    _Desc("e", 2, _slow_float_codec(2, 5, 10, "e"), mformat=26 + _BE),
+    _Desc("f", 4, _float_codec(4, 8, 23, "f"), mformat=14 + _BE),
+    _Desc("d", 8, _float_codec(8, 11, 52, "d"), mformat=16 + _BE),
+    _Desc("Zf", 8, _complex_codec(4, 8, 23, "f"), mformat=22 + _BE),
+    _Desc("Zd", 16, _complex_codec(8, 11, 52, "d"), mformat=24 + _BE),
 )
 _BY_CODE = {d.typecode: d for d in _DESCRIPTORS}
 _UNICODE = ("u", "w")
 
-# memoryview.cast formats for the typecodes it can express
+# memoryview.cast formats for the typecodes it can express (for __buffer__)
 _MV_FORMATS = {"b": "b", "B": "B", "h": "h", "H": "H", "i": "i", "I": "I",
-               "l": "l", "L": "L", "q": "q", "Q": "Q", "e": "e", "f": "f",
-               "d": "d"}
-if _LONG == 4:
-    _MV_FORMATS["l"] = "i"
-    _MV_FORMATS["L"] = "I"
+               "l": _LFMT, "L": _LFMT.upper(), "q": "q", "Q": "Q", "e": "e",
+               "f": "f", "d": "d"}
 
 _MFORMAT_DESCR = (
     (1, 0, 0), (1, 1, 0), (2, 0, 0), (2, 0, 1), (2, 1, 0), (2, 1, 1),
@@ -319,6 +435,30 @@ _MFORMAT_DESCR = (
 
 def _tp_name(obj):
     return type(obj).__name__
+
+
+_RESIZE_MSG = "cannot resize an array that is exporting buffers"
+
+
+def _mutator(f):
+    """Re-word the bytearray's resize-while-exported BufferError as CPython's."""
+    def wrapper(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except BufferError as e:
+            if "Existing exports" in str(e):
+                raise BufferError(_RESIZE_MSG) from None
+            raise
+    wrapper.__name__ = f.__name__
+    wrapper.__qualname__ = f.__qualname__
+    wrapper.__doc__ = f.__doc__
+    return wrapper
+
+
+def _slices(r, isz):
+    """Byte slices of the items in the range of item indices *r*."""
+    starts = range(r.start * isz, r.stop * isz, r.step * isz)
+    return map(slice, starts, map(isz.__add__, starts))
 
 
 class _ImmutableMeta(type):
@@ -335,6 +475,11 @@ class _ImmutableMeta(type):
             raise TypeError(f"cannot delete '{name}' attribute of immutable type "
                             f"'{cls.__module__}.{cls.__qualname__}'")
         type.__delattr__(cls, name)
+
+
+# Arrays above this many bytes are iterated by a host list iterator over a
+# snapshot (no bytecode per item); smaller ones by arrayiterator (live).
+_SNAPSHOT_ITER_BYTES = 1024
 
 
 class array(metaclass=_ImmutableMeta):
@@ -406,7 +551,7 @@ The following type codes are defined:
         if not has_initial:
             return self
         if isinstance(initial, (list, tuple)):
-            self.fromlist(list(initial))
+            self._b += desc.enc_many(list(initial))
         elif isinstance(initial, (bytes, bytearray)):
             self.frombytes(initial)
         elif is_unicode and isinstance(initial, str):
@@ -414,9 +559,7 @@ The following type codes are defined:
         elif isinstance(initial, array) and initial._d is desc:
             self._b += initial._b
         else:
-            it = iter(initial)
-            for v in it:
-                self.append(v)
+            self._b += desc.enc_many(list(initial))
         return self
 
     @classmethod
@@ -453,7 +596,7 @@ The following type codes are defined:
                 return self._getslice(i)
             if getattr(type(i), "__index__", None) is None:
                 raise TypeError("array indices must be integers")
-            i = _to_int(i)
+            i = _index(i)
         d = self._d
         n = len(self._b) // d.itemsize
         if i < 0:
@@ -470,18 +613,18 @@ The following type codes are defined:
         if step == 1:
             data = buf[start * isz:max(start, stop) * isz]
         else:
-            data = bytearray()
-            for k in range(start, stop, step):
-                data += buf[k * isz:(k + 1) * isz]
+            data = b"".join(map(buf.__getitem__,
+                                _slices(range(start, stop, step), isz)))
         return type(self)._make(d, data)
 
+    @_mutator
     def __setitem__(self, i, v):
         if type(i) is not int:
             if isinstance(i, slice):
                 return self._setslice(i, v)
             if getattr(type(i), "__index__", None) is None:
                 raise TypeError("array indices must be integers")
-            i = _to_int(i)
+            i = _index(i)
         d = self._d
         isz = d.itemsize
         n = len(self._b) // isz
@@ -500,7 +643,7 @@ The following type codes are defined:
         isz = d.itemsize
         n = len(self._b) // isz
         start, stop, step = s.indices(n)
-        slicelength = len(range(start, stop, step))
+        r = range(start, stop, step)
         if not isinstance(value, array):
             raise TypeError("can only assign array (not "
                             f"\"{_tp_name(value)}\") to array slice")
@@ -513,13 +656,13 @@ The following type codes are defined:
                 stop = start
             self._b[start * isz:stop * isz] = other
             return
-        if needed != slicelength:
+        if needed != len(r):
             raise ValueError(f"attempt to assign array of size {needed} to "
-                             f"extended slice of size {slicelength}")
-        buf = self._b
-        for j, k in enumerate(range(start, stop, step)):
-            buf[k * isz:(k + 1) * isz] = other[j * isz:(j + 1) * isz]
+                             f"extended slice of size {len(r)}")
+        chunks = map(other.__getitem__, _slices(range(needed), isz))
+        list(map(self._b.__setitem__, _slices(r, isz), chunks))
 
+    @_mutator
     def __delitem__(self, i):
         d = self._d
         isz = d.itemsize
@@ -532,17 +675,17 @@ The following type codes are defined:
                         stop = start
                     del self._b[start * isz:stop * isz]
                     return
-                idx = range(start, stop, step)
-                if len(idx) == 0:
+                r = range(start, stop, step)
+                if len(r) == 0:
                     return
+                if step > 0:
+                    r = r[::-1]
                 # delete back to front so earlier offsets stay valid
-                buf = self._b
-                for k in sorted(idx, reverse=True):
-                    del buf[k * isz:(k + 1) * isz]
+                list(map(self._b.__delitem__, _slices(r, isz)))
                 return
             if getattr(type(i), "__index__", None) is None:
                 raise TypeError("array indices must be integers")
-            i = _to_int(i)
+            i = _index(i)
         if i < 0:
             i += n
         if i < 0 or i >= n:
@@ -550,13 +693,12 @@ The following type codes are defined:
         del self._b[i * isz:(i + 1) * isz]
 
     def __iter__(self):
+        if len(self._b) > _SNAPSHOT_ITER_BYTES:
+            return iter(self.tolist())
         return _make_iter(self, 0)
 
     def __contains__(self, v):
-        for x in self.tolist():
-            if x is v or x == v:
-                return True
-        return False
+        return v in self.tolist()
 
     def __add__(self, other):
         if not isinstance(other, array):
@@ -566,6 +708,7 @@ The following type codes are defined:
             raise TypeError("bad argument type for built-in operation")
         return type(self)._make(self._d, self._b + other._b)
 
+    @_mutator
     def __iadd__(self, other):
         if not isinstance(other, array):
             raise TypeError("can only extend array with array (not "
@@ -578,20 +721,20 @@ The following type codes are defined:
             if getattr(type(n), "__index__", None) is None:
                 raise TypeError("can't multiply sequence by non-int of type "
                                 f"'{_tp_name(n)}'")
-            n = _to_int(n)
+            n = _index(n)
         return n
 
     def __mul__(self, n):
         n = self._repeat_count(n)
         if n < 0:
             n = 0
-        total = len(self._b) * n
-        if total > _sys.maxsize:
+        if len(self._b) * n > _sys.maxsize:
             raise MemoryError
         return type(self)._make(self._d, self._b * n)
 
     __rmul__ = __mul__
 
+    @_mutator
     def __imul__(self, n):
         n = self._repeat_count(n)
         if n < 0:
@@ -644,6 +787,7 @@ The following type codes are defined:
 
     # --- methods -----------------------------------------------------------
 
+    @_mutator
     def append(self, v, /):
         """Append new value v to the end of the array."""
         self._b += self._d.enc(v)
@@ -667,31 +811,38 @@ followed by imaginary part) is preserved."""
         for k in range(c):
             buf[k::c] = orig[c - 1 - k::c]
 
+    @_mutator
     def clear(self):
         """Remove all items from the array."""
         del self._b[:]
 
     def count(self, v, /):
         """Return number of occurrences of v in the array."""
-        n = 0
-        for x in self.tolist():
-            if x is v or x == v:
-                n += 1
-        return n
+        return self.tolist().count(v)
 
+    @_mutator
     def extend(self, iterable, /):
         """Append items to the end of the array."""
         if isinstance(iterable, array):
             self._extend_array(iterable)
-        else:
-            for v in iterable:
+            return
+        vals = list(iterable)
+        try:
+            data = self._d.enc_many(vals)
+        except (TypeError, OverflowError, ValueError):
+            # keep the items before the bad one, as CPython does
+            for v in vals:
                 self.append(v)
+            return
+        if data:
+            self._b += data
 
     def _extend_array(self, other):
         if other._d is not self._d:
             raise TypeError("can only extend with array of same kind")
         self._b += bytes(other._b)
 
+    @_mutator
     def frombytes(self, buffer, /):
         """Appends items from the string, interpreting it as an array of machine
 values, as if it had been read from a file using the fromfile() method)."""
@@ -707,11 +858,11 @@ values, as if it had been read from a file using the fromfile() method)."""
         finally:
             mv.release()
 
+    @_mutator
     def fromfile(self, f, n, /):
         """Read n objects from the file object f and append them to the end of the
 array."""
-        n = _to_int(n, f"'{_tp_name(n)}' object cannot be interpreted as an "
-                       "integer")
+        n = _index(n)
         if n < 0:
             raise ValueError("negative count")
         nbytes = n * self._d.itemsize
@@ -723,15 +874,16 @@ array."""
         if not_enough:
             raise EOFError("read() didn't return enough bytes")
 
+    @_mutator
     def fromlist(self, lst, /):
         """Append items to array from list."""
         if not isinstance(lst, list):
             raise TypeError("arg must be list")
-        enc = self._d.enc
-        data = b"".join([enc(v) for v in lst])
+        data = self._d.enc_many(lst)
         if data:
             self._b += data
 
+    @_mutator
     def fromunicode(self, ustr, /):
         """Extends this array with data from the unicode string ustr.
 
@@ -744,8 +896,7 @@ some other type."""
         if self._d.typecode not in _UNICODE:
             raise ValueError("fromunicode() may only be called on unicode "
                              "type arrays ('u' or 'w')")
-        enc = self._d.enc
-        data = b"".join([enc(c) for c in ustr])
+        data = self._d.enc_str(ustr)
         if data:
             self._b += data
 
@@ -754,29 +905,27 @@ some other type."""
 
 Raise ValueError if the value is not present."""
         n = len(self._b) // self._d.itemsize
-        start = _to_int(start, f"'{_tp_name(start)}' object cannot be "
-                               "interpreted as an integer")
-        stop = _to_int(stop, f"'{_tp_name(stop)}' object cannot be "
-                             "interpreted as an integer")
+        start = _index(start)
+        stop = _index(stop)
         if start < 0:
             start = max(start + n, 0)
         if stop < 0:
             stop += n
-        i = start
-        while i < n and i < stop:
-            x = self._get(i)
-            if x is v or x == v:
-                return i
-            i += 1
+        stop = min(max(stop, 0), n)
+        if start < stop:
+            try:
+                return self.tolist().index(v, start, stop)
+            except ValueError:
+                pass
         raise ValueError("array.index(x): x not in array")
 
+    @_mutator
     def insert(self, i, v, /):
         """Insert a new item v into the array before position i."""
         d = self._d
         isz = d.itemsize
         n = len(self._b) // isz
-        i = _to_int(i, f"'{_tp_name(i)}' object cannot be interpreted as an "
-                       "integer")
+        i = _index(i)
         data = d.enc(v)
         if i < 0:
             i += n
@@ -786,6 +935,7 @@ Raise ValueError if the value is not present."""
             i = n
         self._b[i * isz:i * isz] = data
 
+    @_mutator
     def pop(self, i=-1, /):
         """Return the i-th element and delete it from the array.
 
@@ -793,8 +943,7 @@ i defaults to -1."""
         d = self._d
         isz = d.itemsize
         n = len(self._b) // isz
-        i = _to_int(i, f"'{_tp_name(i)}' object cannot be interpreted as an "
-                       "integer")
+        i = _index(i)
         if n == 0:
             raise IndexError("pop from empty array")
         if i < 0:
@@ -805,29 +954,26 @@ i defaults to -1."""
         del self._b[i * isz:(i + 1) * isz]
         return v
 
+    @_mutator
     def remove(self, v, /):
         """Remove the first occurrence of v in the array."""
-        n = len(self._b) // self._d.itemsize
-        for i in range(n):
-            x = self._get(i)
-            if x is v or x == v:
-                del self[i]
-                return
-        raise ValueError("array.remove(x): x not in array")
+        try:
+            i = self.tolist().index(v)
+        except ValueError:
+            raise ValueError("array.remove(x): x not in array") from None
+        isz = self._d.itemsize
+        del self._b[i * isz:(i + 1) * isz]
 
     def reverse(self):
         """Reverse the order of the items in the array."""
-        d = self._d
-        isz = d.itemsize
+        isz = self._d.itemsize
         if isz == 1:
             self._b[:] = self._b[::-1]
             return
         orig = bytes(self._b)
         n = len(orig) // isz
-        out = bytearray()
-        for k in range(n - 1, -1, -1):
-            out += orig[k * isz:(k + 1) * isz]
-        self._b[:] = out
+        self._b[:] = b"".join(map(orig.__getitem__,
+                                  _slices(range(n - 1, -1, -1), isz)))
 
     def tobytes(self):
         """Convert the array to an array of machine values and return the bytes
@@ -842,11 +988,7 @@ representation."""
 
     def tolist(self):
         """Convert array to an ordinary list with the same items."""
-        d = self._d
-        isz = d.itemsize
-        buf = self._b
-        dec = d.dec
-        return [dec(buf, off) for off in range(0, len(buf) - isz + 1, isz)]
+        return self._d.dec_many(self._b)
 
     def tounicode(self):
         """Extends this array with data from the unicode string ustr.
@@ -881,9 +1023,8 @@ obtain a unicode string from an array of some other type."""
     __class_getitem__ = classmethod(_GenericAlias)
 
     def __buffer__(self, flags, /):
-        d = self._d
         mv = memoryview(self._b)
-        fmt = _MV_FORMATS.get(d.typecode)
+        fmt = _MV_FORMATS.get(self._d.typecode)
         if fmt is None or fmt == "B":
             return mv
         try:
@@ -925,7 +1066,7 @@ class arrayiterator:
     def __setstate__(self, state):
         if self._a is None:
             return
-        i = _to_int(state)
+        i = _index(state)
         if i < 0:
             i = 0
         elif i > len(self._a):
