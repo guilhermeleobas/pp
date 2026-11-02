@@ -3,6 +3,7 @@
 import builtins as _host_builtins
 import types
 
+from pp import call as _call
 from pp.frame import NULL
 from pp.typeobject import (Py_TPFLAGS_METHOD_DESCRIPTOR, register_function_type,
                            register_static_slots)
@@ -277,5 +278,6 @@ def func_descr_get(func, obj, type_):
 
 
 register_function_type(Function)
+_call._Function = Function
 register_static_slots(Function, flags=Py_TPFLAGS_METHOD_DESCRIPTOR,
                       tp_call=_func_tp_call, tp_descr_get=func_descr_get)

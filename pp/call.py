@@ -18,7 +18,7 @@ def _function_type():
     return Function
 
 
-_Function = None
+_Function = None      # pp.funcobject.Function, set when that module loads
 
 
 def _func_vectorcall(func, args, kwargs):
@@ -42,6 +42,8 @@ def _PyVectorcall_Function(callable):
 
 
 def _PyObject_Call(callable, args, kwargs):
+    if type(callable) is _Function:
+        return callable._vm.call_function(callable, args, kwargs)    # _PyFunction_Vectorcall
     vector_func = _PyVectorcall_Function(callable)
     if vector_func is not None:
         return vector_func(callable, args, kwargs)
@@ -62,6 +64,8 @@ def PyObject_Vectorcall(callable, args, kwnames=None):
         npos = len(args) - len(kwnames)
         kwargs = dict(zip(kwnames, args[npos:]))
         return _PyObject_Call(callable, tuple(args[:npos]), kwargs)
+    if type(callable) is _Function:
+        return callable._vm.call_function(callable, args, None)      # _PyFunction_Vectorcall
     return _PyObject_Call(callable, args if type(args) is tuple else tuple(args), None)
 
 
