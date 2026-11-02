@@ -45,6 +45,9 @@ class DecodedCode:
     instructions: tuple
     exception_table: tuple
     _index: dict = field(default_factory=dict, repr=False, compare=False)
+    # offset -> (opcode, instruction, offset, next_offset): what the eval loop
+    # needs per instruction, in one lookup.
+    ops: dict = field(default_factory=dict, repr=False, compare=False)
 
     def at(self, offset: int) -> Instruction:
         return self.instructions[self._index[offset]]
@@ -113,6 +116,24 @@ def parse_exception_table(code: types.CodeType) -> tuple:
         return tuple(entries)
 
 
+# Instructions that do nothing when executed: the eval loop steps over them
+# (an instruction's successor is the next one that does something). Jumps may
+# still land on one, which then runs as a no-op.
+_NOOPS = frozenset(_opcode.opmap[n] for n in ("NOP", "NOT_TAKEN", "EXTENDED_ARG"))
+
+
+def _eval_ops(instrs: tuple) -> dict:
+    """offset -> (opcode, instruction, offset, offset of the next instruction to run)."""
+    ops = {}
+    nxt = None
+    for ins in reversed(instrs):
+        if nxt is None:
+            nxt = ins.next_offset
+        ops[ins.offset] = (ins.opcode, ins, ins.offset, nxt)
+        nxt = nxt if ins.opcode in _NOOPS else ins.offset
+    return ops
+
+
 _cache: dict = {}  # id(code) -> DecodedCode (holds a strong ref, so ids are not reused)
 
 
@@ -122,6 +143,7 @@ def decode(code: types.CodeType) -> DecodedCode:
         return d
     instrs = _decode_instructions(code.co_code)
     index = {ins.offset: k for k, ins in enumerate(instrs)}
-    d = DecodedCode(code, instrs, parse_exception_table(code), index)
+    ops = _eval_ops(instrs)
+    d = DecodedCode(code, instrs, parse_exception_table(code), index, ops)
     _cache[id(code)] = d
     return d

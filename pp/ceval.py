@@ -577,8 +577,7 @@ class VirtualMachine:
         frame.previous = self.frame
         self.frame = frame
         decoded = frame.decoded
-        index = decoded._index
-        instrs = decoded.instructions
+        ops = decoded.ops
         table = self._table
         stack = frame.stack
         exc = throw
@@ -588,10 +587,9 @@ class VirtualMachine:
                 if exc is None:
                     try:
                         while True:
-                            instr = instrs[index[frame.instr_offset]]
-                            cur = frame.lasti = instr.offset
-                            frame.instr_offset = instr.next_offset
-                            if table[instr.opcode](frame, instr) is not None:
+                            op, instr, cur, frame.instr_offset = ops[frame.instr_offset]
+                            frame.lasti = cur
+                            if table[op](frame, instr) is not None:
                                 return frame.return_value
                     except UnimplementedOpcode:
                         raise
