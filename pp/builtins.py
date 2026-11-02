@@ -7,7 +7,7 @@ import types
 from pp.bytecode import compile_source
 from pp.frame import NULL
 from pp.funcobject import Function
-from pp.object import PyObject_SetAttr
+from pp.object import PyObject_GetAttr, PyObject_GetOptionalAttr, PyObject_SetAttr
 
 _host_super = _host_builtins.super
 _MISSING = object()
@@ -202,6 +202,16 @@ def make_builtins(vm) -> types.ModuleType:
     def __import__(name, globals=None, locals=None, fromlist=(), level=0):
         return vm.importer.import_(name, globals, locals, fromlist, level)
 
+    def getattr(obj, name, *default):
+        # builtin_getattr: through the slots of the VM, which hide the table that
+        # carries a class's slots in its `__qualname__`.
+        if len(default) > 1:
+            raise TypeError(f"getattr expected at most 3 arguments, got {2 + len(default)}")
+        if not default:
+            return PyObject_GetAttr(obj, name)
+        res = PyObject_GetOptionalAttr(obj, name)
+        return default[0] if res is NULL else res
+
     def setattr(obj, name, value, /):
         # builtin_setattr: PyObject_SetAttr (types get their slots updated there).
         PyObject_SetAttr(obj, name, value)
@@ -219,6 +229,7 @@ def make_builtins(vm) -> types.ModuleType:
         f.__qualname__ = f.__name__
         ns[f.__name__] = f
     # Host builtins do not bind as methods (`class T: f = delattr`); these must not either.
+    ns["getattr"] = _BuiltinFunction(getattr)
     ns["setattr"] = _BuiltinFunction(setattr)
     ns["delattr"] = _BuiltinFunction(delattr)
     ns["super"] = super

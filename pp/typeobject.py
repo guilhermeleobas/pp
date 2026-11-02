@@ -1281,6 +1281,20 @@ def _PySuper_Lookup(su_type, su_obj, name, super_type, method_ok):
     return _object.PyObject_GenericGetAttr(su, name), False
 
 _TYPE_NEW_FUNC = type.__new__
+_TYPE_GETATTRIBUTE = type.__getattribute__
+
+
+def type_getattro(tp, name):
+    """tp_getattro of `type`. The guest must not see the `_QualName` that carries
+    the slot table as the `__qualname__` of a class (pickle would refuse it)."""
+    res = _TYPE_GETATTRIBUTE(tp, name)
+    if type(res) is _QualName:
+        return str(res)
+    return res
+
+
+register_wrapper_slot("tp_getattro", type.__dict__["__getattribute__"], type_getattro)
+PyType_Modified(type)       # `type`'s table may have been built already
 register_wrapper_slot("tp_call", _TYPE_CALL, type_call)
 register_static_slots(types.BuiltinFunctionType, tp_call=cfunction_call)
 
