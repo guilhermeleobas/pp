@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pp stdlib status</title>
+<style>
+:root{--bg:#fff;--fg:#1c1e21;--mut:#666d76;--card:#f4f5f7;--bd:#d9dce1;--pass:#1a7f37;--partial:#0969da;--fail:#cf222e;--blocked:#9a6700;--timeout:#bc4c00;--untested:#6e7781;--notest:#8c959f;--bar:#1a7f37;--skip:#8c959f;--queued:#6e7781;--running:#0969da;--waiting:#9a6700;--done:#1a7f37;--failed:#cf222e}
+@media(prefers-color-scheme:dark){:root{--bg:#14161a;--fg:#e6e8eb;--mut:#9aa1ab;--card:#1e2127;--bd:#343a43;--pass:#3fb950;--partial:#58a6ff;--fail:#f85149;--blocked:#d29922;--timeout:#f0883e;--untested:#8b949e;--notest:#6e7681;--bar:#3fb950;--skip:#6e7681;--queued:#8b949e;--running:#58a6ff;--waiting:#d29922;--done:#3fb950;--failed:#f85149}}
+*{box-sizing:border-box}
+body{margin:0;padding:16px;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;max-width:1000px;margin-inline:auto}
+h1{font-size:1.4rem;margin:0}h2{font-size:1.1rem;margin:1.5rem 0 .5rem}
+header p{margin:.2rem 0 0;color:var(--mut)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(105px,1fr));gap:8px}
+.tile{background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:8px 10px}
+.tile b{display:block;font-size:1.4rem}.tile span{color:var(--mut);font-size:.8rem}
+.tile.r{border-left:4px solid var(--c)}
+.progress{height:14px;background:var(--card);border:1px solid var(--bd);border-radius:7px;overflow:hidden;margin:.5rem 0 .2rem}
+.progress div{height:100%;background:var(--bar)}
+ul{margin:0;padding-left:1.2rem}code{font-family:ui-monospace,Menlo,monospace;font-size:.9em}
+.filters{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.filters input{flex:1 1 180px}
+input,select{padding:6px 8px;border:1px solid var(--bd);border-radius:6px;background:var(--card);color:var(--fg);font:inherit}
+.wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.9rem}
+th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--bd);vertical-align:top}
+td.d{word-break:break-word;color:var(--mut)}
+th.sort{cursor:pointer;user-select:none;white-space:nowrap}th.sort:focus-visible{outline:2px solid var(--partial)}
+.tb{display:flex;align-items:center;gap:8px;min-width:230px}
+.tb .seg{display:flex;flex:0 0 110px;height:10px;background:var(--card);border:1px solid var(--bd);border-radius:5px;overflow:hidden}
+.tb .seg i{display:block;height:100%}
+.tb span{font-size:.82rem;white-space:nowrap}
+.legend{display:flex;flex-wrap:wrap;gap:12px;color:var(--mut);font-size:.8rem;margin-bottom:6px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;background:var(--c)}
+.badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:.78rem;color:#fff;background:var(--c);white-space:nowrap}
+.mut{color:var(--mut);margin:0}
+.card{background:var(--card);border:1px solid var(--bd);border-left:4px solid var(--c);border-radius:8px;padding:8px 10px}
+.card small{display:block;color:var(--mut);font-size:.8rem}
+.card .top{display:flex;justify-content:space-between;gap:8px;align-items:flex-start;margin-bottom:2px}
+.card .top .badge{flex:none}
+</style>
+</head>
+<body>
+<header>
+<h1>pp stdlib status</h1>
+<p id="meta"></p>
+</header>
+<section>
+</section>
+<p id="empty" hidden>No modules tracked yet. Add names to <code>TRACKED</code> in <code>tools/stdlib_status.py</code>.</p>
+<main id="main">
+<h2>Summary</h2>
+<div class="tiles" id="results"></div>
+<div class="tiles" id="kinds" style="margin-top:8px"></div>
+<div class="progress"><div id="bar"></div></div>
+<div id="progress-label" style="color:var(--mut);font-size:.85rem"></div>
+<h2>Top blockers</h2>
+<ul id="blockers"></ul>
+<h2>Modules</h2>
+<div class="filters">
+<input id="q" type="search" placeholder="Filter modules or details" aria-label="Filter">
+<select id="fr" aria-label="Result"></select>
+<select id="fk" aria-label="Kind"></select>
+</div>
+<div class="legend" id="legend"></div>
+<div class="wrap"><table>
+<thead><tr><th>Tier</th><th>Module</th><th>Kind</th><th>CPython test</th><th>Result</th><th class="sort" id="sortp" tabindex="0" role="columnheader" aria-sort="none" title="Sort by pass percentage">Tests passed</th><th>Out of scope</th><th>Detail</th></tr></thead>
+<tbody id="rows"></tbody>
+</table></div>
+<p id="count" style="color:var(--mut);font-size:.85rem"></p>
+</main>
+<script type="application/json" id="data">{"generated":"2026-11-02","cpython":"3.15.2","counts":{"partial":11,"pass":6,"fail":2,"blocked":2,"timeout":1},"kinds":{"Python + C helper":9,"Python":12,"C only":1},"blockers":[["opcode GET_AWAITABLE is not implemented",2]],"rows":[{"module":"operator","kind":"Python + C helper","test":"test/test_operator.py","tier":1,"result":"partial","detail":"FAILED (errors=3, skipped=59)","passed":50,"total":112,"failures":null,"errors":null,"skipped":null,"note":""},{"module":"keyword","kind":"Python","test":"test/test_keyword.py","tier":1,"result":"pass","detail":"","passed":11,"total":11,"failures":null,"errors":null,"skipped":null,"note":""},{"module":"types","kind":"Python + C helper","test":"test/test_types.py","tier":1,"result":"fail","detail":"ModuleNotFoundError: Standard library module '_datetime' was not found","passed":0,"total":0,"failures":null,"errors":null,"skipped":null,"note":""},{"module":"functools","kind":"Python + C helper","test":"test/test_functools.py","tier":1,"result":"partial","detail":"FAILED (failures=7, errors=4, skipped=125)","passed":202,"total":338,"failures":null,"errors":null,"skipped":null,"note":""},{"module":"collections","kind":"Python + C helper","test":"test/test_collections.py","tier":1,"result":"blocked","detail":"opcode GET_AWAITABLE is not implemented","passed":0,"total":0,"failures":null,"errors":null,"skipped":null,"note":""},{"module":"heapq","kind":"Python + C helper","test":"test/test_heapq.py","tier":1,"result":"partial","detail":"FAILED (failures=2, skipped=34)","passed":33,"total":69,"failures":null,"errors":null,"skipped":null,"note":""},{"module":"reprlib","kind":"Python","test":"test/test_reprlib.py","tier":1,"result":"partial","detail":"FAILED (errors=1, skipped=2)","passed":30,"total":33,"failures":null,"errors":null,"skipped":null,"note":""},{"module":"copyreg","kind":"Python","test":"test/test_copyreg.py","tier":1,"result":"pass","detail":"","passed":6,"total":6,"failures":null,"errors":null,"skipped":null,"note":""},{"module":"itertools","kind":"C only","test":"test/test_itertools.py","tier":1,"result":"timeout","detail":">600s","passed":0,"total":0,"failures":null,"errors":null,"skipped":null,"note":""},{"module":"enum","kind":"Python","test":"test/test_enum.py","tier":2,"result":"partial","detail":"FAILED (failures=10, errors=5, skipped=4)","passed":1068,"total":1087,"failures":null,"errors":null,"skipped":null,"note":""},{"module":"contextlib","kind":"Python","test":"test/test_contextlib.py","tier":2,"result":"fail","detail":"E","passed":0,"total":0,"failures":null,"errors":null,"skipped":null,"note":""},{"module":"warnings","kind":"Python + C helper","test":"test/test_warnings","tier":2,"result":"partial","detail":"FAILED (failures=64, errors=15, skipped=6)","passed":120,"total":205,"failures":null,"errors":null,"skipped":null,"note":""},{"module":"weakref","kind":"Python + C helper","test":"test/test_weakref.py","tier":2,"result":"partial","detail":"FAILED (failures=10, skipped=2)","passed":128,"total":140,"failures":null,"errors":null,"skipped":null,"note":""},{"module":"abc","kind":"Python + C helper","test":"test/test_abc.py","tier":2,"result":"pass","detail":"","passed":76,"total":76,"failures":null,"errors":null,"skipped":null,"note":""},{"module":"string","kind":"Python + C helper","test":"test/test_string","tier":2,"result":"partial","detail":"FAILED (errors=54)","passed":1,"total":55,"failures":null,"errors":null,"skipped":null,"note":""},{"module":"textwrap","kind":"Python","test":"test/test_textwrap.py","tier":2,"result":"pass","detail":"","passed":68,"total":68,"failures":null,"errors":null,"skipped":null,"note":""},{"module":"fnmatch","kind":"Python","test":"test/test_fnmatch.py","tier":2,"result":"pass","detail":"","passed":24,"total":24,"failures":null,"errors":null,"skipped":null,"note":""},{"module":"traceback","kind":"Python","test":"test/test_traceback.py","tier":3,"result":"partial","detail":"FAILED (failures=50, errors=149, skipped=133)","passed":109,"total":441,"failures":null,"errors":null,"skipped":null,"note":""},{"module":"difflib","kind":"Python","test":"test/test_difflib.py","tier":3,"result":"partial","detail":"FAILED (failures=25)","passed":36,"total":61,"failures":null,"errors":null,"skipped":null,"note":""},{"module":"pprint","kind":"Python","test":"test/test_pprint.py","tier":3,"result":"pass","detail":"","passed":77,"total":77,"failures":null,"errors":null,"skipped":null,"note":""},{"module":"argparse","kind":"Python","test":"test/test_argparse.py","tier":3,"result":"partial","detail":"FAILED (failures=4, errors=2, skipped=1)","passed":1956,"total":1963,"failures":null,"errors":null,"skipped":null,"note":""},{"module":"unittest","kind":"Python","test":"test/test_unittest","tier":3,"result":"blocked","detail":"opcode GET_AWAITABLE is not implemented","passed":0,"total":0,"failures":null,"errors":null,"skipped":null,"note":""}]}</script>
+<script>
+const D = JSON.parse(document.getElementById("data").textContent);
+const $ = id => document.getElementById(id);
+const COLORS = {pass:"--pass", partial:"--partial", fail:"--fail", blocked:"--blocked", timeout:"--timeout", untested:"--untested", "no test":"--notest"};
+const color = r => "var(" + (COLORS[r] || "--untested") + ")";
+const el = (tag, text, cls) => { const e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; };
+
+$("meta").textContent = "Generated " + D.generated + " against CPython " + D.cpython;
+
+
+if (!D.rows.length) { $("empty").hidden = false; $("main").hidden = true; }
+
+function tile(label, n, c) {
+  const t = el("div", null, "tile" + (c ? " r" : ""));
+  if (c) t.style.setProperty("--c", c);
+  t.append(el("b", n), el("span", label));
+  return t;
+}
+for (const r of Object.keys(COLORS)) $("results").append(tile(r, D.counts[r] || 0, color(r)));
+for (const k of Object.keys(D.kinds)) $("kinds").append(tile(k, D.kinds[k]));
+
+const withTests = D.rows.filter(r => r.test).length;
+const passed = D.counts.pass || 0;
+const casesPassed = D.rows.reduce((n, r) => n + (r.passed || 0), 0);
+const casesTotal = D.rows.reduce((n, r) => n + (r.total || 0), 0);
+const pct = casesTotal ? Math.round(100 * casesPassed / casesTotal) : 0;
+$("bar").style.width = pct + "%";
+$("progress-label").textContent = passed + " of " + withTests + " modules fully pass; " +
+  casesPassed + " of " + casesTotal + " test cases pass (" + pct + "%)";
+
+if (!D.blockers.length) $("blockers").append(el("li", "none"));
+for (const [k, v] of D.blockers) {
+  const li = el("li"); li.append(el("code", k), " → " + v + (v === 1 ? " module" : " modules"));
+  $("blockers").append(li);
+}
+
+function fill(sel, label, values) {
+  sel.append(new Option(label, ""));
+  for (const v of values) sel.append(new Option(v, v));
+}
+fill($("fr"), "All results", Object.keys(COLORS));
+fill($("fk"), "All kinds", Object.keys(D.kinds));
+
+const SEGS = [["passed", "--pass"], ["failures", "--fail"], ["errors", "--timeout"], ["skipped", "--skip"]];
+for (const [k, c] of SEGS) { const s = el("span", k === "failures" ? "failed" : k); s.prepend(el("i")); s.firstChild.style.setProperty("--c", "var(" + c + ")"); $("legend").append(s); }
+const known = r => SEGS.every(([k]) => typeof r[k] === "number");
+function testBar(r) {
+  const box = el("div", null, "tb"), seg = el("div", null, "seg"), lab = el("span");
+  if (r.total) {
+    const parts = known(r) ? SEGS.map(([k, c]) => [r[k], c, k]) : [[r.passed, "--pass", "passed"], [r.total - r.passed, "--skip", "not passed"]];
+    for (const [n, c, k] of parts) {
+      if (!n) continue;
+      const i = el("i"); i.style.width = (100 * n / r.total) + "%"; i.style.background = "var(" + c + ")"; i.title = n + " " + k;
+      seg.append(i);
+    }
+    lab.textContent = r.passed + " / " + r.total + " (" + (100 * r.passed / r.total).toFixed(1) + "%)";
+  } else lab.textContent = "—";
+  box.append(seg, lab);
+  return box;
+}
+// sort: 0 = table order, 1 = pass % descending, -1 = ascending; modules without counts always last
+let sortDir = 0;
+const pctOf = r => r.total ? r.passed / r.total : null;
+function cycleSort() { sortDir = sortDir === 0 ? 1 : sortDir === 1 ? -1 : 0; render(); }
+$("sortp").addEventListener("click", cycleSort);
+$("sortp").addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); cycleSort(); } });
+
+function render() {
+  $("sortp").setAttribute("aria-sort", sortDir === 0 ? "none" : sortDir === 1 ? "descending" : "ascending");
+  $("sortp").textContent = "Tests passed" + (sortDir === 1 ? " ▼" : sortDir === -1 ? " ▲" : "");
+  const q = $("q").value.trim().toLowerCase(), fr = $("fr").value, fk = $("fk").value;
+  const body = $("rows"); body.textContent = "";
+  let n = 0;
+  const rows = sortDir === 0 ? D.rows : D.rows.slice().sort((a, b) => {
+    const x = pctOf(a), y = pctOf(b);
+    if (x === null || y === null) return (x === null) - (y === null);
+    return (y - x) * sortDir || b.total - a.total;
+  });
+  for (const r of rows) {
+    if (fr && r.result !== fr) continue;
+    if (fk && r.kind !== fk) continue;
+    if (q && !(r.module + " " + r.detail).toLowerCase().includes(q)) continue;
+    const tr = el("tr");
+    const b = el("span", r.result, "badge"); b.style.setProperty("--c", color(r.result));
+    const res = el("td"); res.append(b);
+    tr.append(el("td", String(r.tier)), el("td", r.module), el("td", r.kind), el("td", r.test || "—"), res, (() => { const td = el("td"); td.append(testBar(r)); return td; })(), el("td", r.note, "d"), el("td", r.detail, "d"));
+    body.append(tr); n++;
+  }
+  $("count").textContent = n + " of " + D.rows.length + " modules";
+}
+for (const id of ["q", "fr", "fk"]) $(id).addEventListener("input", render);
+render();
+</script>
+</body>
+</html>
