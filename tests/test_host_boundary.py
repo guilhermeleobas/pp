@@ -94,6 +94,9 @@ class _Scanner(ast.NodeVisitor):
             self._check_import(node, alias.name)
 
     def visit_ImportFrom(self, node):
+        for alias in node.names:
+            if alias.name == "__import__":
+                self._add(node, "import of `__import__` (dynamic import by name)")
         if node.level:
             if self.in_lib:
                 self._add(node, f"relative import {'.' * node.level + (node.module or '')!r}"
@@ -143,8 +146,17 @@ class _Scanner(ast.NodeVisitor):
             self._add(node, "reference to `.__import__` (dynamic import by name)")
         self.generic_visit(node)
 
+    def visit_Subscript(self, node):
+        # Exempt only the key of a `<expr>.builtins["__import__"]` lookup.
+        k = node.slice
+        if (isinstance(k, ast.Constant) and k.value == "__import__"
+                and isinstance(node.value, ast.Attribute) and node.value.attr == "builtins"
+                and self._exempt(k, "str")):
+            self._skip.add(id(k))
+        self.generic_visit(node)
+
     def visit_Constant(self, node):
-        if node.value == "__import__" and not self._exempt(node, "str"):
+        if node.value == "__import__" and id(node) not in self._skip:
             self._add(node, 'string "__import__" (dynamic import by name)')
 
 
@@ -183,6 +195,12 @@ HOST_CALL = (
     "        return _host_builtins.__import__(spec.name)\n"
 )
 
+IMPORT_NAME_OK = (
+    "class VirtualMachine:\n"
+    "    def IMPORT_NAME(self, f, i):\n"
+    "        return f.builtins[\"__import__\"]\n"
+)
+
 # (rel path, source, expected substring of a problem, or None when clean)
 CASES = [
     ("pp/x.py", "import sys, types\nfrom enum import Enum\n", None),
@@ -217,6 +235,13 @@ CASES = [
     ("pp/lib/m.py", "from . import x", "relative import"),
     ("pp/lib/m.py", "from pp.ceval import x", "host implementation"),
     ("pp/lib/m.py", "__import__('os')", "__import__"),
+    ("pp/x.py", "from builtins import __import__ as imp", "import of `__import__`"),
+    ("pp/x.py", "from os import __import__", "import of `__import__`"),
+    ("pp/ceval.py", IMPORT_NAME_OK, None),
+    ("pp/ceval.py", IMPORT_NAME_OK.replace("f.builtins[\"__import__\"]",
+                                           "getattr(_host_builtins, '__import__')"),
+     '"__import__"'),
+    ("pp/ceval.py", IMPORT_NAME_OK.replace("f.builtins[", "f.other["), '"__import__"'),
     ("pp/lib/m.py", "import _imp", "`_imp` may only be imported"),
 ]
 
