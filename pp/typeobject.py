@@ -251,10 +251,10 @@ def _register_host_types() -> None:
     # Objects/memoryobject.c
     reg(memoryview, True, True, ("sq_length", "sq_item", "mp_length", "mp_subscript",
                                  "mp_ass_subscript"))
-    # Number types: nb_add / nb_multiply, no sequence or mapping
-    for tp in (int, float, complex):
+    # Number types: nb_add / nb_multiply, no sequence or mapping (bool inherits int's)
+    for tp in (int, bool, float, complex):
         reg(tp, False, False, ("nb_add", "nb_multiply"))
-    for tp in (bool, object, type, type(None)):
+    for tp in (object, type, type(None)):
         reg(tp, False, False, ())
 
 
