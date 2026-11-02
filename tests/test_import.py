@@ -75,13 +75,21 @@ def test_module_functions_are_vm_functions():
     assert isinstance(g["functools"].reduce, pp.function.Function)  # not _functools'
 
 
-@pytest.mark.parametrize("name", ["_heapq", "_functools", "_operator", "_bisect", "_json"])
+@pytest.mark.parametrize("name", ["_heapq", "_functools", "_operator"])
 def test_blocked_accelerator(name):
     __import__(name)  # host has it
     with pytest.raises(ImportError):
         pp.run_source(f"import {name}\n")
     g = pp.run_source(f"try:\n    import {name}\nexcept ImportError as e:\n    r = type(e).__name__\n")
     assert g["r"] in ("ImportError", "ModuleNotFoundError")
+
+
+@pytest.mark.parametrize("name", ["_bisect", "_json", "_csv", "_datetime"])
+def test_accelerator_stand_in(name):
+    # reimplemented in pp/lib, so guest imports get the VM-executed module
+    g = pp.run_source(f"import {name} as m\n")
+    assert g["m"] is not sys.modules.get(name)
+    assert pathlib.Path(g["m"].__file__).parent.name == "lib"
 
 
 def test_missing_module():
