@@ -63,7 +63,7 @@ of the task, skipping or parking the blocked part. The orchestrator adds it to
 
 The user's Claude quota is shared with other work, so keep usage modest:
 
-- At most two agents running at once; Sonnet by default. Opus only for the
+- At most four agents running at once; Sonnet by default. Opus only for the
   reviewer and judge, with compact briefs and capped finding counts.
 - Prefer one combined reviewer+judge pass for small changes.
 - Check usage between tasks; above ~50% of the session limit, pause new work
