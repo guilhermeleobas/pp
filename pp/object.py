@@ -14,7 +14,7 @@ from pp.typeobject import (Py_TPFLAGS_METHOD_DESCRIPTOR, Py_TYPE, PyObject_TypeC
                            PyType_Check, PyType_IsSubtype, PyType_View, _PyObject_GetDictPtr,
                            _PyType_Lookup, _PyObject_GenericGetDict, DICT_NONE, DICT_STD,
                            _ReferenceType, _tp_dict, _type_dictget, _views_get, _object_getattribute,
-                           _new_view,
+                           _new_view, _UNSET,
                            register_wrapper_slot, update_slot)
 
 Py_LT, Py_LE, Py_EQ, Py_NE, Py_GT, Py_GE = range(6)
@@ -169,13 +169,9 @@ def PyObject_GenericGetAttr(obj, name):
     if type(name) is not str and not PyUnicode_Check(name):
         raise _name_error(name)
 
-    descr = NULL
-    for entry in tp.tp_chain:                    # _PyType_Lookup(tp, name)
-        if type(entry) is _ReferenceType:
-            entry = _tp_dict(entry())
-        descr = _type_dictget(entry, name, NULL)
-        if descr is not NULL:
-            break
+    descr = tp.tp_cache.get(name, _UNSET)        # _PyType_Lookup(tp, name)
+    if descr is _UNSET:
+        descr = _PyType_Lookup(tp, name)
     f = None
     if descr is not NULL:
         descr_type = _views_get(id(type(descr))) or Py_TYPE(descr)
@@ -242,13 +238,9 @@ def _PyObject_GetMethod(obj, name):
     if tp.tp_getattro is not PyObject_GenericGetAttr or type(name) is not str:
         return PyObject_GetAttr(obj, name), False
 
-    descr = NULL
-    for entry in tp.tp_chain:                    # _PyType_Lookup(tp, name)
-        if type(entry) is _ReferenceType:
-            entry = _tp_dict(entry())
-        descr = _type_dictget(entry, name, NULL)
-        if descr is not NULL:
-            break
+    descr = tp.tp_cache.get(name, _UNSET)        # _PyType_Lookup(tp, name)
+    if descr is _UNSET:
+        descr = _PyType_Lookup(tp, name)
     f = None
     meth_found = False
     if descr is not NULL:

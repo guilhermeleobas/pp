@@ -41,6 +41,13 @@ from pp.genobject import PyAsyncGenObject, PyCoroObject, PyGenObject
 from pp import genobject as _genobject
 
 _GenericGetAttr = _obj.PyObject_GenericGetAttr
+_GenericSetAttr = _obj.PyObject_GenericSetAttr
+_UNSET = _typeobject._UNSET
+DICT_STD = _typeobject.DICT_STD
+_NB_SUBSCR = [n for n, _ in _opcode._nb_ops].index("NB_SUBSCR")
+_SUBSCRIPT_TYPES = frozenset((list, tuple, dict, str))
+_CONTAINS_TYPES = frozenset((dict, set, frozenset))
+_MethodDescriptorType = types.MethodDescriptorType
 _BuiltinFunction = types.BuiltinFunctionType
 _MethodType = types.MethodType
 _views_get = _typeobject._views_get
@@ -856,6 +863,10 @@ class VirtualMachine:
                     args.insert(0, callable.__self__)
                     stack.append(func._vm.call_function(func, args, None))
                     return
+            elif tc is _MethodDescriptorType:
+                # CALL_METHOD_DESCRIPTOR_*: method_vectorcall of a host C method
+                stack.append(callable(*args))
+                return
             elif tc is _BuiltinFunction and len(args) != 4:
                 # CALL_BUILTIN_FAST: cfunction_call minus the type.__new__ special case
                 stack.append(callable(*args))
@@ -1068,6 +1079,11 @@ class VirtualMachine:
         lhs = stack.pop()
         tl = type(lhs)
         tr = type(rhs)
+        if i.arg == _NB_SUBSCR and tl in _SUBSCRIPT_TYPES:
+            # BINARY_OP_SUBSCR_LIST_INT / _TUPLE_INT / _DICT / _STR_INT & co: the
+            # exact builtin container's own mp_subscript.
+            stack.append(lhs[rhs])
+            return
         if tl in _NUMBER_TYPES and tr in _NUMBER_TYPES:
             fn = _NUMBER_BINOPS[i.arg]
             if fn is not None:
@@ -1097,6 +1113,9 @@ class VirtualMachine:
         sub = f.stack.pop()
         container = f.stack.pop()
         v = f.stack.pop()
+        if type(container) is dict or type(container) is list:
+            container[sub] = v          # STORE_SUBSCR_DICT / _LIST_INT
+            return
         PyObject_SetItem(container, sub, v)
 
     def DELETE_SUBSCR(self, f, i):
@@ -1147,6 +1166,10 @@ class VirtualMachine:
     def CONTAINS_OP(self, f, i):
         right = f.stack.pop()
         left = f.stack.pop()
+        if type(right) in _CONTAINS_TYPES:
+            # CONTAINS_OP_DICT / _SET: the exact builtin's own sq_contains.
+            f.stack.append((left in right) ^ bool(i.arg))
+            return
         f.stack.append(PySequence_Contains(right, left) ^ bool(i.arg))
 
     # --- control flow ---
@@ -1329,7 +1352,18 @@ class VirtualMachine:
     def STORE_ATTR(self, f, i):
         owner = f.stack.pop()
         v = f.stack.pop()
-        PyObject_SetAttr(owner, f.code.co_names[i.arg], v)
+        name = f.code.co_names[i.arg]
+        view = _views_get(id(type(owner))) or Py_TYPE(owner)
+        if view.tp_setattro is _GenericSetAttr and view.tp_getattro is _GenericGetAttr \
+                and view.tp_dictkind == DICT_STD:
+            # PyObject_GenericSetAttr for a plain instance: no descriptor in the way.
+            descr = view.tp_cache.get(name, _UNSET)
+            if descr is _UNSET:
+                descr = _PyType_Lookup(view, name)
+            if descr is NULL:
+                _dict_setitem(owner.__dict__, name, v)
+                return
+        PyObject_SetAttr(owner, name, v)
 
     def DELETE_ATTR(self, f, i):
         PyObject_SetAttr(f.stack.pop(), f.code.co_names[i.arg], NULL)

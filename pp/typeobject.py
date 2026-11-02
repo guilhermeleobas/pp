@@ -161,7 +161,7 @@ class PyTypeObject:
     itself): it refers to the type through a weak reference, and to the dicts
     of heap types in its MRO through weak references too."""
     __slots__ = ("_tpref", "tp_id", "tp_name", "tp_flags", "tp_mro_ids", "tp_chain",
-                 "tp_dictkind", "tp_has_sequence") + SLOT_FIELDS + STATIC_FIELDS
+                 "tp_dictkind", "tp_has_sequence", "tp_cache") + SLOT_FIELDS + STATIC_FIELDS
 
     def __init__(self, tp):
         ident = id(tp)
@@ -176,6 +176,7 @@ class PyTypeObject:
             else:
                 chain.append(_tp_dict(base))    # a static type's dict never changes
         self.tp_chain = tuple(chain)
+        self.tp_cache = {}          # name -> _PyType_Lookup result (the method cache)
         self.tp_flags = _tp_flags(tp) | _EXTRA_FLAGS.get(ident, 0)
         self.tp_name = _compute_tp_name(tp, self.tp_flags)
         self.tp_dictkind = DICT_NONE
@@ -418,9 +419,19 @@ def PyType_Modified(tp) -> None:
         PyType_Modified(sub)
 
 
+def _clear_lookup_cache(tp) -> None:
+    view = _views.get(id(tp))
+    if view is not None:
+        view.tp_cache.clear()
+    for sub in _tp_subclasses(tp):
+        _clear_lookup_cache(sub)
+
+
 def update_slot(tp, name) -> None:
     if type(name) is str and name in SLOT_DUNDERS:
         PyType_Modified(tp)
+    else:
+        _clear_lookup_cache(tp)
 
 
 def PyType_Check(o) -> bool:
@@ -435,7 +446,22 @@ def PyType_IsSubtype(a, b) -> bool:
 
 
 def _PyType_Lookup(tp, name):
-    """MRO lookup; `tp` is a PyTypeObject view. Returns NULL if absent."""
+    """MRO lookup; `tp` is a PyTypeObject view. Returns NULL if absent.
+
+    Results are cached per view (CPython's type method cache); the cache is
+    cleared by `update_slot` / `PyType_Modified`."""
+    res = tp.tp_cache.get(name, _UNSET)
+    if res is _UNSET:
+        res = _type_lookup_uncached(tp, name)
+        if type(name) is str:
+            tp.tp_cache[name] = res
+    return res
+
+
+_UNSET = object()
+
+
+def _type_lookup_uncached(tp, name):
     for entry in tp.tp_chain:
         if type(entry) is _ReferenceType:
             entry = _tp_dict(entry())
