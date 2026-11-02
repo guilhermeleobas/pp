@@ -27,10 +27,10 @@ pixi run cpython-tests           # CPython's Lib/test for tracked modules
 ## Status
 
 [STATUS.md](STATUS.md) (also rendered as `docs/dashboard.html`) tracks, per
-stdlib module, how many of CPython's own tests pass under pp, plus what is in
-progress. Known blockers are in [BLOCKERS.md](BLOCKERS.md).
+stdlib module, how many of CPython's own tests pass under pp. Known blockers are in [BLOCKERS.md](BLOCKERS.md).
 
 ## Docs
 
+- [ROADMAP.md](ROADMAP.md) — what is done, in review, and next.
 - [DESIGN.md](DESIGN.md) — architecture, host boundary, milestones.
 - [WORKFLOW.md](WORKFLOW.md) — how the work is organized.

@@ -14,6 +14,7 @@ Temporary: `_collections`, `_contextvars`, `_locale`, `_posixsubprocess`, `_rand
 
 | Result | Modules |
 |---|---|
+| untested | 27 |
 | partial | 11 |
 | pass | 6 |
 | fail | 2 |
@@ -22,8 +23,8 @@ Temporary: `_collections`, `_contextvars`, `_locale`, `_posixsubprocess`, `_rand
 
 | Kind | Modules | What pp needs |
 |---|---|---|
-| Python | 12 | run the `.py` source through the VM |
-| Python + C helper | 9 | use its Python fallback if it has one, else reimplement the `_<name>` C helper |
+| Python | 30 | run the `.py` source through the VM |
+| Python + C helper | 18 | use its Python fallback if it has one, else reimplement the `_<name>` C helper |
 | C only | 1 | reimplement in Python under `pp/lib/` |
 
 ## Top blockers
@@ -58,3 +59,30 @@ Temporary: `_collections`, `_contextvars`, `_locale`, `_posixsubprocess`, `_rand
 | 3 | pprint | Python | test/test_pprint.py | pass | `██████████` 100% 77/77 |  |  |
 | 3 | argparse | Python | test/test_argparse.py | partial | `██████████` 99% 1956/1963 |  | FAILED (failures=4, errors=2, skipped=1) |
 | 3 | unittest | Python | test/test_unittest | blocked | — |  | opcode GET_AWAITABLE is not implemented |
+| 4 | bisect | Python + C helper | test/test_bisect.py | untested | — |  |  |
+| 4 | colorsys | Python | test/test_colorsys.py | untested | — |  |  |
+| 4 | copy | Python | test/test_copy.py | untested | — |  |  |
+| 4 | dataclasses | Python | test/test_dataclasses | untested | — |  |  |
+| 4 | graphlib | Python | test/test_graphlib.py | untested | — |  |  |
+| 4 | json | Python | test/test_json | untested | — |  |  |
+| 4 | fractions | Python | test/test_fractions.py | untested | — |  |  |
+| 4 | statistics | Python + C helper | test/test_statistics.py | untested | — |  |  |
+| 4 | shlex | Python | test/test_shlex.py | untested | — |  |  |
+| 4 | glob | Python | test/test_glob.py | untested | — |  |  |
+| 4 | posixpath | Python | test/test_posixpath.py | untested | — |  |  |
+| 4 | tomllib | Python | test/test_tomllib | untested | — |  |  |
+| 4 | base64 | Python | test/test_base64.py | untested | — |  |  |
+| 4 | html | Python | test/test_html.py | untested | — |  |  |
+| 4 | csv | Python + C helper | test/test_csv.py | untested | — |  |  |
+| 4 | ipaddress | Python | test/test_ipaddress.py | untested | — |  |  |
+| 4 | random | Python + C helper | test/test_random.py | untested | — |  |  |
+| 4 | typing | Python + C helper | test/test_typing.py | untested | — |  |  |
+| 4 | decimal | Python + C helper | test/test_decimal.py | untested | — |  |  |
+| 4 | datetime | Python + C helper | test/test_datetime.py | untested | — |  |  |
+| 4 | inspect | Python | test/test_inspect | untested | — |  |  |
+| 4 | dis | Python | test/test_dis.py | untested | — |  |  |
+| 4 | ast | Python + C helper | test/test_ast | untested | — |  |  |
+| 4 | queue | Python + C helper | test/test_queue.py | untested | — |  |  |
+| 4 | calendar | Python | test/test_calendar.py | untested | — |  |  |
+| 4 | optparse | Python | test/test_optparse.py | untested | — |  |  |
+| 4 | configparser | Python | test/test_configparser.py | untested | — |  |  |
