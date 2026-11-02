@@ -12,3 +12,6 @@ D().f()
 print(sorted(vars(D)) == sorted(vars(D)), len(vars(D)))
 C.__qualname__ = "Renamed"
 C().f(); print(C.__qualname__, repr(C))
+q = type.__dict__["__qualname__"].__get__(D)
+print(type(D.__qualname__) is str, type(q) is str, type(getattr(D, "__qualname__")) is str,
+      type(type.__getattribute__(D, "__qualname__")) is str)

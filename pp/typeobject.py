@@ -19,6 +19,7 @@ functions raise. "Missing" is the `NULL` sentinel.
 """
 
 import types
+from weakref import getweakrefcount as _getweakrefcount, ref as _ref
 
 from pp.errors import _PyErr_Clear, _PyThreadState_GET
 from pp.frame import NULL
@@ -155,20 +156,18 @@ class PyTypeObject:
     """The slot table of one host type.
 
     CPython keeps the slots in the type object; a host type cannot be extended, so
-    a heap type's table hangs off the one writable field of a type that is neither
-    visible in `__dict__` nor traversed by the collector: its `__qualname__`, which
-    may be a str subclass (`_QualName`). Since the collector does not see that
-    edge, the table must not own the type, or anything that owns it: it holds data
-    only (ids, flags, slot functions, a version tag) and every lookup is given the
-    type. The tables of static and immutable types, which are never freed, live in
-    `_views`."""
-    __slots__ = ("tp_id", "tp_name", "tp_flags", "tp_mro_ids", "tp_version_tag",
+    the tables live in `_views`, keyed by the id of the type with a weak reference
+    that drops the entry when the type dies. A table holds data only (ids, flags,
+    slot functions, a version tag), nothing that owns the type, and every lookup is
+    given the type itself."""
+    __slots__ = ("tp_ref", "tp_id", "tp_name", "tp_flags", "tp_mro_ids", "tp_version_tag",
                  "tp_dictkind", "tp_has_sequence") + SLOT_FIELDS + STATIC_FIELDS
 
     def __init__(self, tp):
         ident = id(tp)
         self.tp_id = ident
-        self.tp_mro_ids = frozenset([id(base) for base in _tp_mro(tp)])
+        self.tp_ref = None
+        self.tp_mro_ids = frozenset([id(base) for base in _tp_mro(tp) or ()])
         self.tp_version_tag = _next_version_tag()
         self.tp_flags = _tp_flags(tp) | _EXTRA_FLAGS.get(ident, 0)
         self.tp_name = _compute_tp_name(tp, self.tp_flags)
@@ -181,11 +180,6 @@ class PyTypeObject:
 
     def __repr__(self):
         return f"<PyTypeObject {self.tp_name}>"
-
-
-class _QualName(str):
-    """A heap type's `__qualname__` carrying its PyTypeObject."""
-    __slots__ = ("view", "plain")       # `plain`: the str it replaced
 
 
 def _compute_tp_name(tp, flags) -> str:
@@ -290,7 +284,7 @@ def _mro_host_fields(tp) -> frozenset:
 
 # --- views --------------------------------------------------------------------
 
-_views: dict = {}              # id(type) -> PyTypeObject, for the types that are never freed
+_views: dict = {}              # id(type) -> PyTypeObject, dropped when the type dies
 _views_get = _views.get
 _EXTRA_FLAGS: dict = {}        # id(host type) -> extra tp_flags (types pp defines in Python)
 _STATIC_SLOTS: dict = {}       # id(host type) -> {field: function}: "C" slots implemented by pp
@@ -300,9 +294,6 @@ _object_setattr = object.__setattr__
 _object_delattr = object.__delattr__
 _object_getstate = object.__dict__["__getstate__"]
 _tp_dictoffset = type.__dict__["__dictoffset__"].__get__
-_qualname_get = type.__dict__["__qualname__"].__get__
-_qualname_set = type.__dict__["__qualname__"].__set__
-_MUTABLE_HEAP = Py_TPFLAGS_HEAPTYPE | Py_TPFLAGS_IMMUTABLETYPE
 
 # Type version tags (Objects/typeobject.c): a table gets a new tag whenever the
 # type or a base changes, so entries of the method cache made under the old one
@@ -334,47 +325,40 @@ def Py_TYPE(o) -> PyTypeObject:
 
 def PyType_View(tp) -> PyTypeObject:
     """The PyTypeObject of a host type object."""
-    view = _views_get(id(tp))
-    if view is None:
-        qualname = _qualname_get(tp)
-        if type(qualname) is _QualName:
-            view = qualname.view
-            if view.tp_id == id(tp):    # not one copied along with a `__qualname__`
-                return view
-        return _new_view(tp)
-    return view
+    return _views_get(id(tp)) or _new_view(tp)
 
 
-def _own_view(tp):
-    """The table of `tp` if one was built, else None."""
-    view = _views_get(id(tp))
-    if view is None:
-        qualname = _qualname_get(tp)
-        if type(qualname) is _QualName and qualname.view.tp_id == id(tp):
-            return qualname.view
-    return view
+def _drop_view(ident, ref) -> None:
+    """The weakref callback of a type: forget its table (unless a newer type took
+    the id and already has its own)."""
+    view = _views_get(ident)
+    if view is not None and view.tp_ref is ref:
+        del _views[ident]
 
 
 def _new_view(tp) -> PyTypeObject:
     view = PyTypeObject(tp)
-    stored = False
-    if view.tp_flags & _MUTABLE_HEAP == Py_TPFLAGS_HEAPTYPE:
-        plain = _qualname_get(tp)
-        qualname = _QualName(plain)
-        qualname.view = view
-        qualname.plain = plain
-        try:
-            _qualname_set(tp, qualname)
-            stored = True
-        except (TypeError, AttributeError):
-            pass
-    if not stored:
-        _views[view.tp_id] = view
-    fixup_slot_dispatchers(tp, view)
-    view.tp_dictkind = _find_dict_kind(tp)
-    host = _HOST_TYPES.get(view.tp_id)
-    if host is not None:
-        view.tp_has_sequence = host[0]
+    if _tp_mro(tp) is None:
+        # A class under construction, asked about by an overridden mro(): no MRO
+        # yet, so no slots; not kept.
+        return view
+    ident = view.tp_id
+    # Every live heap type is weakly referenced (by its base's subclasses): none
+    # left means its weakrefs were cleared and it is being finalized, so a
+    # callback would never run; use the table without keeping it.
+    dying = view.tp_flags & Py_TPFLAGS_HEAPTYPE and _getweakrefcount(tp) == 0
+    if not dying:
+        view.tp_ref = _ref(tp, lambda ref, ident=ident: _drop_view(ident, ref))
+    _views[ident] = view
+    try:
+        fixup_slot_dispatchers(tp, view)
+        view.tp_dictkind = _find_dict_kind(tp)
+        host = _HOST_TYPES.get(ident)
+        if host is not None:
+            view.tp_has_sequence = host[0]
+    finally:
+        if dying:
+            del _views[ident]
     return view
 
 
@@ -407,10 +391,7 @@ def _PyObject_GetDictPtr(obj, view):
 def PyType_Modified(tp) -> None:
     """Drop the slot tables of `tp` and its subclasses (rebuilt lazily from the
     MRO). Called after any change to a type's dict or bases."""
-    if _views.pop(id(tp), None) is None:
-        qualname = _qualname_get(tp)
-        if type(qualname) is _QualName:
-            _qualname_set(tp, qualname.plain)
+    _views.pop(id(tp), None)
     for sub in _tp_subclasses(tp):
         PyType_Modified(sub)
 
@@ -418,7 +399,7 @@ def PyType_Modified(tp) -> None:
 def _clear_lookup_cache(tp) -> None:
     """`type_modified` for a change that leaves the slots alone: a new version tag
     retires every method-cache entry of `tp` and its subclasses."""
-    view = _own_view(tp)
+    view = _views_get(id(tp))
     if view is not None:
         view.tp_version_tag = _next_version_tag()
     for sub in _tp_subclasses(tp):
@@ -455,7 +436,7 @@ _MCACHE = [(0, None, None)] * _MCACHE_SIZE
 
 def _PyType_Lookup(tp, name):
     """MRO lookup in the host type `tp`. Returns NULL if absent."""
-    view = _views_get(id(tp)) or PyType_View(tp)
+    view = _views_get(id(tp)) or _new_view(tp)
     tag = view.tp_version_tag
     if type(name) is str:
         index = (tag ^ hash(name)) & _MCACHE_MASK
@@ -1283,20 +1264,6 @@ def _PySuper_Lookup(su_type, su_obj, name, super_type, method_ok):
     return _object.PyObject_GenericGetAttr(su, name), False
 
 _TYPE_NEW_FUNC = type.__new__
-_TYPE_GETATTRIBUTE = type.__getattribute__
-
-
-def type_getattro(tp, name):
-    """tp_getattro of `type`. The guest must not see the `_QualName` that carries
-    the slot table as the `__qualname__` of a class (pickle would refuse it)."""
-    res = _TYPE_GETATTRIBUTE(tp, name)
-    if type(res) is _QualName:
-        return res.plain
-    return res
-
-
-register_wrapper_slot("tp_getattro", type.__dict__["__getattribute__"], type_getattro)
-PyType_Modified(type)       # `type`'s table may have been built already
 register_wrapper_slot("tp_call", _TYPE_CALL, type_call)
 register_static_slots(types.BuiltinFunctionType, tp_call=cfunction_call)
 
