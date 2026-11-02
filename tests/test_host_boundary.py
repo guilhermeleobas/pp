@@ -22,7 +22,7 @@ LIB = PP / "lib"
 # "Rules for code under `pp/`"; ask before adding to this list.
 ALLOWED_HOST_IMPORTS = frozenset({
     "sys", "types", "builtins", "opcode", "dataclasses", "enum", "typing", "io",
-    "argparse", "os", "_imp",
+    "argparse", "os", "_imp", "weakref",
 })
 
 # Allowed only in these files (DESIGN.md: "_imp (importer only)").

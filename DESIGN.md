@@ -56,7 +56,9 @@ Rules for code under `pp/`:
 
 - Must not import `dis` (it is the test oracle, not a dependency).
 - May import only: `sys`, `types`, `builtins`, `opcode` (data tables only),
-  `dataclasses`, `enum`, `typing`, `io`, `argparse`, `os`, `_imp` (importer only). Ask before adding to
+  `dataclasses`, `enum`, `typing`, `io`, `argparse`, `os`, `_imp` (importer only),
+  `weakref` (VM-side bookkeeping only, e.g. per-type slot data keyed by type;
+  guest `import weakref` still gets `pp/lib`). Ask before adding to
   this list.
 - No C extensions, no `ctypes`.
 - `pp/lib/` is guest code: it may import other `pp/lib` modules, pure-Python
