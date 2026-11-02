@@ -1465,8 +1465,12 @@ class VirtualMachine:
         view = _views_get(id(type(owner))) or Py_TYPE(owner)
         if view.tp_setattro is _GenericSetAttr and view.tp_getattro is _GenericGetAttr \
                 and view.tp_dictkind == DICT_STD:
-            # PyObject_GenericSetAttr for a plain instance: no descriptor in the way.
-            if _PyType_Lookup(type(owner), name) is NULL:
+            # PyObject_GenericSetAttr for a plain instance: no descriptor in the way
+            # (the method-cache probe of _PyType_Lookup done here).
+            descr = view.tp_cache.get(name, _MISSING)
+            if descr is _MISSING:
+                descr = _PyType_Lookup(type(owner), name)
+            if descr is NULL:
                 _dict_setitem(owner.__dict__, name, v)
                 return
         PyObject_SetAttr(owner, name, v)
