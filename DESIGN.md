@@ -272,3 +272,69 @@ Known milestone 2 gaps that are acceptable: `async`, template strings
 - `sys.exception()` / `sys.exc_info()` called from VM code must reflect the VM's
   handled exception (not a documented gap).
 - `__file__` is an absolute, resolved path.
+
+## Milestone 3: CPython's object protocol, mirrored
+
+Goal: opcode handlers and pp's runtime dispatch exactly as CPython does, through
+the same structures and functions, instead of relying on host operators. Values
+stay host objects; what becomes ours is the *dispatch*: type slots,
+descriptors, attribute lookup, the abstract object layer, frames, generators
+and exception state.
+
+### Type slots (`pp/typeobject.py`)
+
+- `PyTypeObject`-shaped slot table per type, with CPython's field names
+  (`tp_getattro`, `tp_setattro`, `tp_descr_get`, `tp_descr_set`, `tp_call`,
+  `tp_richcompare`, `tp_iter`, `tp_iternext`, `tp_hash`, `tp_new`, `tp_init`,
+  `nb_add`, `nb_inplace_add`, ..., `nb_bool`, `mp_subscript`,
+  `mp_ass_subscript`, `sq_contains`, ...).
+- **Only add a slot when an opcode or abstract function needs it.** No
+  `tp_flags` bits, `tp_basicsize`, buffer slots, GC slots, etc., unless
+  something actually reads them. The slot list grows with use.
+- Slots are filled like `typeobject.c`'s `slotdefs` / `update_one_slot` /
+  `fixup_slot_dispatchers`: from the type's MRO, a dunder defined in Python
+  (VM `Function`, `staticmethod`, `classmethod`, ...) gets the matching
+  `slot_*` function (`slot_tp_getattr_hook`, `slot_nb_add` via the
+  `SLOT1BINFULL` logic, `slot_tp_richcompare`, ...); a dunder provided by a host
+  C type calls that host method directly (it is the "C slot").
+- `_PyType_Lookup(type, name)`: MRO walk over `type.__dict__`s.
+- Caching is optional; if added it must be invalidated when a type's dict or
+  `__bases__` change. Correctness first.
+
+### Abstract layer (`pp/object.py`, `pp/abstract.py`)
+
+CPython's functions, same names and algorithms, built on the slots:
+`PyObject_GetAttr`, `PyObject_SetAttr`, `PyObject_GenericGetAttr` /
+`_PyObject_GenericGetAttrWithDict` / `PyObject_GenericSetAttr` (data vs
+non-data descriptor precedence, instance `__dict__`), `_PyObject_GetMethod`
+(LOAD_ATTR method form), `PyObject_RichCompare` / `do_richcompare` (reflected
+order, `NotImplemented`), `PyObject_IsTrue`, `PyObject_Hash`,
+`PyNumber_*` / `PyNumber_InPlace*` via `binary_op1` / `binary_iop1`
+(subclass-first rule), `PyObject_GetItem` / `SetItem` / `DelItem`,
+`PySequence_Contains`, `PyObject_GetIter`, `PyIter_Next`, `PyObject_Call` /
+vectorcall. Only the functions the VM actually calls.
+
+### Descriptors and functions (`pp/funcobject.py`, `pp/descrobject.py`)
+
+`PyFunctionObject` (`func_descr_get` → `PyMethodObject`), and the descriptor
+types pp needs to own (`classmethod`, `staticmethod`, `property` only if host
+versions can't be driven correctly through the slots).
+
+### Frames, generators, exceptions
+
+- `pp/frame.py`: `_PyInterpreterFrame` field names (`f_executable`, `f_globals`,
+  `f_builtins`, `f_locals`, `f_funcobj`, `localsplus`, `stackpointer`,
+  `instr_ptr`, `previous`, `owner`) plus the `PyFrameObject` view.
+- `pp/genobject.py`: `PyGenObject` with `gi_frame_state`
+  (`FRAME_CREATED`, `FRAME_SUSPENDED`, `FRAME_EXECUTING`, `FRAME_COMPLETED`,
+  ...), `gen_send_ex2`, `gen_throw`, `gen_close`, `gi_exc_state`.
+- `pp/errors.py` (name kept; `UnimplementedOpcode` stays): the thread state's
+  `exc_info` chain of `_PyErr_StackItem`, `_PyErr_SetObject` (implicit
+  chaining happens here and only here), `_PyErr_ChainStackItem`,
+  `_PyErr_GetTopmostException`.
+- `pp/ceval.py`: dispatch and `exception_unwind`; opcode handlers call the
+  abstract layer, never Python operators on values (no `a + b`, `a[b]`,
+  `getattr`, `==` on user values inside handlers).
+
+Out of scope: our own object representations (`PyLongObject`, `PyDictObject`,
+...). Values remain host objects.
