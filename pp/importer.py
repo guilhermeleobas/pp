@@ -32,7 +32,6 @@ HOST_MODULES_PERMANENT = frozenset({
     "time",
     "marshal",
     "_warnings",
-    "gc",
     "_typing",      # TypeVar & co. are object-model types (also used by intrinsics)
     "_codecs",
     "_signal",
