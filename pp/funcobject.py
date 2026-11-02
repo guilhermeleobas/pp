@@ -4,7 +4,8 @@ import builtins as _host_builtins
 import types
 
 from pp.frame import NULL
-from pp.typeobject import Py_TPFLAGS_METHOD_DESCRIPTOR, register_static_slots
+from pp.typeobject import (Py_TPFLAGS_METHOD_DESCRIPTOR, register_function_type,
+                           register_static_slots)
 
 CO_OPTIMIZED = 0x1
 CO_VARARGS = 0x4
@@ -275,5 +276,6 @@ def func_descr_get(func, obj, type_):
     return PyMethod_New(func, obj)
 
 
+register_function_type(Function)
 register_static_slots(Function, flags=Py_TPFLAGS_METHOD_DESCRIPTOR,
                       tp_call=_func_tp_call, tp_descr_get=func_descr_get)

@@ -161,7 +161,7 @@ class PyTypeObject:
     slot functions, a version tag), nothing that owns the type, and every lookup is
     given the type itself."""
     __slots__ = ("tp_ref", "tp_id", "tp_name", "tp_flags", "tp_mro_ids", "tp_version_tag",
-                 "tp_dictkind", "tp_has_sequence") + SLOT_FIELDS + STATIC_FIELDS
+                 "tp_cache", "tp_dictkind", "tp_has_sequence") + SLOT_FIELDS + STATIC_FIELDS
 
     def __init__(self, tp):
         ident = id(tp)
@@ -169,6 +169,7 @@ class PyTypeObject:
         self.tp_ref = None
         self.tp_mro_ids = frozenset([id(base) for base in _tp_mro(tp) or ()])
         self.tp_version_tag = _next_version_tag()
+        self.tp_cache = {}      # the method cache (see _PyType_Lookup)
         self.tp_flags = _tp_flags(tp) | _EXTRA_FLAGS.get(ident, 0)
         self.tp_name = _compute_tp_name(tp, self.tp_flags)
         self.tp_dictkind = DICT_NONE
@@ -402,6 +403,7 @@ def _clear_lookup_cache(tp) -> None:
     view = _views_get(id(tp))
     if view is not None:
         view.tp_version_tag = _next_version_tag()
+        view.tp_cache = {}
     for sub in _tp_subclasses(tp):
         _clear_lookup_cache(sub)
 
@@ -424,37 +426,56 @@ def PyType_IsSubtype(a, b) -> bool:
     return b.tp_id in a.tp_mro_ids
 
 
-# The method cache: a fixed-size array indexed by a hash of (tp_version_tag, name).
-# An entry is overwritten on collision and matches only the version tag it was made
-# under. It does not own the type: what the lookup found in the type's own dict is
-# not stored (a method using `__class__` would keep its class alive), only what a
-# base provides, or that nothing was found.
-_MCACHE_SIZE = 1 << 12
-_MCACHE_MASK = _MCACHE_SIZE - 1
-_MCACHE = [(0, None, None)] * _MCACHE_SIZE
+# The method cache. CPython's is a global array indexed by a hash of
+# (tp_version_tag, name); here each slot table keeps its own dict, name -> result,
+# emptied whenever the version tag changes (and gone with the table when the type
+# is modified or dies). It does not own the type: what the lookup found in the
+# type's own dict is stored only as a weak reference (a method using `__class__`
+# would keep its class alive), and only for functions; what a base provides, or
+# that nothing was found, is stored as is.
+_MISS = object()
+
+
+class _OwnRef(_ref):
+    """A method-cache entry for something found in the type's own dict."""
+    __slots__ = ()
+
+
+_OWN_CACHEABLE: set = {types.FunctionType}   # weakly referenceable function types
+
+
+def register_function_type(tp) -> None:
+    """Functions of type `tp` found in a type's own dict are method-cached (weakly)."""
+    _OWN_CACHEABLE.add(tp)
 
 
 def _PyType_Lookup(tp, name):
     """MRO lookup in the host type `tp`. Returns NULL if absent."""
     view = _views_get(id(tp)) or _new_view(tp)
-    tag = view.tp_version_tag
     if type(name) is str:
-        index = (tag ^ hash(name)) & _MCACHE_MASK
-        entry = _MCACHE[index]
-        if entry[0] == tag and entry[1] is name:
-            return entry[2]
+        cache = view.tp_cache
+        res = cache.get(name, _MISS)
+        if res is not _MISS:
+            if type(res) is not _OwnRef:
+                return res
+            res = res()
+            if res is not None:
+                return res
     else:
-        index = -1
+        cache = None
     depth = 0
     for base in _tp_mro(tp):
         res = _type_dictget(_tp_dict(base), name, NULL)
         if res is not NULL:
-            if depth and index >= 0:
-                _MCACHE[index] = (tag, name, res)
+            if cache is not None:
+                if depth:
+                    cache[name] = res
+                elif type(res) in _OWN_CACHEABLE:
+                    cache[name] = _OwnRef(res)
             return res
         depth += 1
-    if index >= 0:
-        _MCACHE[index] = (tag, name, NULL)
+    if cache is not None:
+        cache[name] = NULL
     return NULL
 
 
