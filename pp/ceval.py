@@ -10,7 +10,7 @@ from pp import call as _call
 from pp import errors as _errors
 from pp import typeobject as _typeobject
 from pp import object as _obj
-from pp.abstract import (PYGEN_RETURN, PyIter_Next, PyIter_Send, PyNumber_Add, PyNumber_And, PyNumber_FloorDivide,
+from pp.abstract import (PYGEN_NEXT, PYGEN_RETURN, PyIter_Next, PyIter_Send, PyNumber_Add, PyNumber_And, PyNumber_FloorDivide,
                          PyNumber_InPlaceAdd, PyNumber_InPlaceAnd, PyNumber_InPlaceFloorDivide,
                          PyNumber_InPlaceLshift, PyNumber_InPlaceMatrixMultiply,
                          PyNumber_InPlaceMultiply, PyNumber_InPlaceOr, PyNumber_InPlaceRemainder,
@@ -62,6 +62,14 @@ _FAST_ITERATORS = frozenset((type(iter([])), type(iter(())), type(iter(range(1))
 
 _OBJECT_NEW = object.__dict__["__new__"]
 _object_new = object.__new__
+
+# Exact builtin iterators whose exhaustion is a bare StopIteration: none of
+# them calls back into code that could raise one carrying a value (as map,
+# filter, zip or enumerate can).
+_VALUELESS_ITERATORS = frozenset((type(iter([])), type(iter(())), type(iter(range(1))),
+                                  type(iter("")), type(iter({})), type(iter({}.values())),
+                                  type(iter({}.items())), type(iter(set())), type(iter(b"")),
+                                  type(reversed([])), type(iter(range(1 << 70)))))
 
 _EXIT = object()  # returned by a handler to leave the eval loop
 
@@ -1019,7 +1027,20 @@ class VirtualMachine:
     def SEND(self, f, i):
         v = f.stack.pop()
         receiver = f.stack[-2]
-        kind, res = PyIter_Send(receiver, v)
+        tr = type(receiver)
+        if tr is PyGenObject or tr is PyCoroObject:
+            # SEND_GEN: am_send of a generator or coroutine.
+            kind, res = gen_send_ex(receiver, v)
+        elif v is None and tr in _VALUELESS_ITERATORS:
+            # PyIter_Send of an exact builtin iterator: tp_iternext; when exhausted,
+            # its StopIteration never carries a value.
+            res = _next(receiver, _MISSING)
+            if res is _MISSING:
+                kind, res = PYGEN_RETURN, None
+            else:
+                kind = PYGEN_NEXT
+        else:
+            kind, res = PyIter_Send(receiver, v)
         f.stack.append(res)
         if kind == PYGEN_RETURN:
             f.instr_offset = i.jump_target
@@ -1270,7 +1291,13 @@ class VirtualMachine:
 
     def GET_ITER(self, f, i):
         v = f.stack.pop()
-        f.stack.append(iter(v) if type(v) in _ITER_TYPES else PyObject_GetIter(v))
+        tv = type(v)
+        if tv in _ITER_TYPES:
+            v = iter(v)
+        elif not (tv in _FAST_ITERATORS or tv is PyGenObject):
+            # (an exact builtin iterator or generator is its own iterator)
+            v = PyObject_GetIter(v)
+        f.stack.append(v)
         f.stack.append(NULL)  # index_or_null: always NULL in pp
 
     def FOR_ITER(self, f, i, _fast=_FAST_ITERATORS, _next=_next, _MISSING=_MISSING, _type=type):
