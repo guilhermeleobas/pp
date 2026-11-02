@@ -45,6 +45,8 @@ _GenericSetAttr = _obj.PyObject_GenericSetAttr
 _UNSET = _typeobject._UNSET
 _object_getattribute = _typeobject._object_getattribute
 DICT_STD = _typeobject.DICT_STD
+DICT_NONE = _typeobject.DICT_NONE
+_ITER_TYPES = frozenset((list, tuple, dict, set, frozenset, str, bytes, range))
 _NB_SUBSCR = [n for n, _ in _opcode._nb_ops].index("NB_SUBSCR")
 _SUBSCRIPT_TYPES = frozenset((list, tuple, dict, str))
 _CONTAINS_TYPES = frozenset((dict, set, frozenset))
@@ -1203,7 +1205,8 @@ class VirtualMachine:
     # --- iteration ---
 
     def GET_ITER(self, f, i):
-        f.stack.append(PyObject_GetIter(f.stack.pop()))
+        v = f.stack.pop()
+        f.stack.append(iter(v) if type(v) in _ITER_TYPES else PyObject_GetIter(v))
         f.stack.append(NULL)  # index_or_null: always NULL in pp
 
     def FOR_ITER(self, f, i):
@@ -1338,6 +1341,17 @@ class VirtualMachine:
         name = f.code.co_names[i.arg >> 1]
         if i.arg & 1:
             # Method form: (unbound method, self) if the attribute is a method, else (attr, NULL).
+            view = _views_get(id(type(owner))) or Py_TYPE(owner)
+            if view.tp_getattro is _GenericGetAttr:
+                # _PyObject_GetMethod for the common case: a plain function or a C
+                # method descriptor in the type, not shadowed by the instance dict.
+                descr = view.tp_cache.get(name, _UNSET)
+                if descr is not _UNSET and (type(descr) is Function or type(descr) is _MethodDescriptorType):
+                    kind = view.tp_dictkind
+                    if kind == DICT_NONE or (kind == DICT_STD and name not in _object_getattribute(owner, "__dict__")):
+                        f.stack.append(descr)
+                        f.stack.append(owner)
+                        return
             attr, meth_found = _PyObject_GetMethod(owner, name)
             f.stack.append(attr)
             f.stack.append(owner if meth_found else NULL)
