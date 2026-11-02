@@ -51,6 +51,7 @@ _MethodDescriptorType = types.MethodDescriptorType
 _BuiltinFunction = types.BuiltinFunctionType
 _MethodType = types.MethodType
 _views_get = _typeobject._views_get
+_OwnRef = _typeobject._OwnRef
 
 _next = next
 _FAST_ITERATORS = frozenset((type(iter([])), type(iter(())), type(iter(range(1))), type(iter("")),
@@ -1416,38 +1417,44 @@ class VirtualMachine:
     def LOAD_ATTR(self, f, i):
         owner = f.stack.pop()
         name = f.code.co_names[i.arg >> 1]
-        if i.arg & 1:
-            # Method form: (unbound method, self) if the attribute is a method, else (attr, NULL).
-            view = _views_get(id(type(owner))) or Py_TYPE(owner)
-            if view.tp_getattro is _GenericGetAttr:
-                # _PyObject_GetMethod for the common case: a plain function or a C
-                # method descriptor in the type, not shadowed by the instance dict.
-                descr = _PyType_Lookup(type(owner), name)
+        tp = type(owner)
+        view = _views_get(id(tp)) or Py_TYPE(owner)
+        if view.tp_getattro is _GenericGetAttr:
+            # _PyType_Lookup, its method-cache probe done here.
+            descr = view.tp_cache.get(name, _MISSING)
+            if type(descr) is _OwnRef:
+                descr = descr()
+                if descr is None:
+                    descr = _PyType_Lookup(tp, name)
+            elif descr is _MISSING:
+                descr = _PyType_Lookup(tp, name)
+            if i.arg & 1:
+                # Method form: (unbound method, self) if the attribute is a method, else
+                # (attr, NULL). _PyObject_GetMethod for the common case: a plain function
+                # or a C method descriptor in the type, not shadowed by the instance dict.
                 if type(descr) is Function or type(descr) is _MethodDescriptorType:
                     kind = view.tp_dictkind
                     if kind == DICT_NONE or (kind == DICT_STD and name not in owner.__dict__):
                         f.stack.append(descr)
                         f.stack.append(owner)
                         return
+            elif descr is NULL and view.tp_dictkind == DICT_STD:
+                # An instance attribute of a plain object: nothing in the type
+                # (not even a non-data descriptor) shadows it.
+                res = owner.__dict__.get(name, NULL)
+                if res is not NULL:
+                    f.stack.append(res)
+                    return
+        if i.arg & 1:
             attr, meth_found = _PyObject_GetMethod(owner, name)
             f.stack.append(attr)
             f.stack.append(owner if meth_found else NULL)
+        elif view.tp_getattro is _GenericGetAttr:
+            # PyObject_GetAttr -> tp_getattro, minus the error-context wrapper
+            # (the generic getattr sets name/obj itself).
+            f.stack.append(_GenericGetAttr(owner, name))
         else:
-            view = _views_get(id(type(owner))) or Py_TYPE(owner)
-            if view.tp_getattro is _GenericGetAttr:
-                # PyObject_GetAttr -> tp_getattro, minus the error-context wrapper
-                # (the generic getattr sets name/obj itself).
-                if view.tp_dictkind == DICT_STD:
-                    # An instance attribute of a plain object: nothing in the type
-                    # (not even a non-data descriptor) shadows it.
-                    if _PyType_Lookup(type(owner), name) is NULL:
-                        res = owner.__dict__.get(name, NULL)
-                        if res is not NULL:
-                            f.stack.append(res)
-                            return
-                f.stack.append(_GenericGetAttr(owner, name))
-            else:
-                f.stack.append(PyObject_GetAttr(owner, name))
+            f.stack.append(PyObject_GetAttr(owner, name))
 
     def STORE_ATTR(self, f, i):
         owner = f.stack.pop()
