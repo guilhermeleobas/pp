@@ -899,21 +899,32 @@ class VirtualMachine:
         nargs = i.arg
         stack = f.stack
         callable = stack[-2 - nargs]
+        # The arguments, self (or the NULL before it) prepended.
+        if stack[-1 - nargs] is NULL:
+            args = stack[-nargs:] if nargs else []
+        else:
+            args = stack[-1 - nargs:]
+        del stack[-2 - nargs:]
         tc = type(callable)
-        if tc is Function or tc is type:
-            # The arguments, self (or the NULL before it) prepended.
-            if stack[-1 - nargs] is NULL:
-                args = stack[-nargs:] if nargs else []
-                del stack[-2 - nargs:]
-            else:
-                args = stack[-1 - nargs:]
-                del stack[-2 - nargs:]
-            if tc is Function:
-                if callable._vm is self:
-                    # _PyFunction_Vectorcall
-                    stack.append(self.call_function(callable, args, None))
-                    return
-            elif (_PyType_Lookup(callable, "__new__") is _OBJECT_NEW
+        if tc is _MethodDescriptorType or (tc is _BuiltinFunction and len(args) != 4):
+            # CALL_METHOD_DESCRIPTOR_* / CALL_BUILTIN_FAST: the host C function
+            # (cfunction_call minus the type.__new__ special case).
+            stack.append(callable(*args))
+            return
+        if tc is Function:
+            if callable._vm is self:
+                # _PyFunction_Vectorcall
+                stack.append(self.call_function(callable, args, None))
+                return
+        elif tc is _MethodType:
+            # _PyObject_Vectorcall of a bound method: prepend self
+            func = callable.__func__
+            if type(func) is Function and func._vm is self:
+                args.insert(0, callable.__self__)
+                stack.append(self.call_function(func, args, None))
+                return
+        elif tc is type:
+            if (_PyType_Lookup(callable, "__new__") is _OBJECT_NEW
                     and type(init := _PyType_Lookup(callable, "__init__")) is Function
                     and init._vm is self):
                 # type_call of a class with object.__new__ and an __init__ written
@@ -925,9 +936,10 @@ class VirtualMachine:
                     raise TypeError(f"__init__() should return None, not '{Py_TYPE(res).tp_name}'")
                 stack.append(obj)
                 return
-            stack.append(_call.PyObject_Vectorcall(callable, args, None))
+            # tp_call of type
+            stack.append(_typeobject.type_call(callable, args, None))
             return
-        self._call(f, nargs, ())
+        stack.append(_call.PyObject_Vectorcall(callable, args, None))
 
     def CALL_KW(self, f, i):
         kwnames = f.stack.pop()
