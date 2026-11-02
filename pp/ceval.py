@@ -36,7 +36,7 @@ from pp.errors import (PyErr_GivenExceptionMatches, PyExceptionClass_Check, PyTh
                        _PyErr_SetRaisedException, _PyThreadState_Swap)
 from pp.frame import NULL, Frame  # noqa: F401  (NULL is part of the pp.vm API)
 from pp.funcobject import Function, PyFunction_New, bind_arguments, builtins_from_globals
-from pp.genobject import PyAsyncGenObject, PyCoroObject, PyGenObject
+from pp.genobject import PyAsyncGenObject, PyCoroObject, PyGenObject, gen_send_ex
 
 _GenericGetAttr = _obj.PyObject_GenericGetAttr
 _GenericSetAttr = _obj.PyObject_GenericSetAttr
@@ -1281,6 +1281,17 @@ class VirtualMachine:
             if v is not _MISSING:
                 stack.append(v)
                 return
+        elif _type(it) is PyGenObject:
+            # FOR_ITER_GEN: resume the generator (gen_iternext without the
+            # StopIteration it raises once the generator returns).
+            try:
+                kind, v = gen_send_ex(it, None, True)
+                if kind != PYGEN_RETURN:
+                    stack.append(v)
+                    return
+            except StopIteration:
+                pass
+            _PyErr_Clear(self.tstate)
         else:
             try:
                 stack.append(Py_TYPE(it).tp_iternext(it))
