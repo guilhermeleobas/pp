@@ -43,6 +43,7 @@ from pp import genobject as _genobject
 _GenericGetAttr = _obj.PyObject_GenericGetAttr
 _GenericSetAttr = _obj.PyObject_GenericSetAttr
 _UNSET = _typeobject._UNSET
+_object_getattribute = _typeobject._object_getattribute
 DICT_STD = _typeobject.DICT_STD
 _NB_SUBSCR = [n for n, _ in _opcode._nb_ops].index("NB_SUBSCR")
 _SUBSCRIPT_TYPES = frozenset((list, tuple, dict, str))
@@ -1345,6 +1346,15 @@ class VirtualMachine:
             if view.tp_getattro is _GenericGetAttr:
                 # PyObject_GetAttr -> tp_getattro, minus the error-context wrapper
                 # (the generic getattr sets name/obj itself).
+                if view.tp_dictkind == DICT_STD:
+                    # An instance attribute of a plain object: nothing in the type
+                    # (not even a non-data descriptor) shadows it.
+                    descr = view.tp_cache.get(name, _UNSET)
+                    if descr is NULL:
+                        res = _dict_get(_object_getattribute(owner, "__dict__"), name, NULL)
+                        if res is not NULL:
+                            f.stack.append(res)
+                            return
                 f.stack.append(_GenericGetAttr(owner, name))
             else:
                 f.stack.append(PyObject_GetAttr(owner, name))
