@@ -151,3 +151,90 @@ RETURN_VALUE.
 - Snippets that need features beyond the current milestone are marked
   `xfail(strict=True)` with the missing opcode in the reason, so the suite
   tracks progress.
+
+## Clarifications (from milestone 1)
+
+- `run_source(globals=g)` executes in `g` itself and returns that same dict. If
+  `g` has no `__builtins__`, pp inserts it, as `exec` does.
+- `DecodedCode.at(offset)` / `index_of(offset)` raise `KeyError` for an offset
+  that is not the start of an instruction.
+- `next_offset` is always `offset + 2 + 2 * cache_entries`.
+- CLI: when the program raises, `python -m pp run` prints the traceback to
+  stderr and exits 1 (like `python`).
+
+## Milestone 2: functions, classes, exceptions, generators, imports
+
+Goal: `python -m pp run` executes a script that imports and uses the tier-1
+stdlib modules (`operator`, `keyword`, `types`, `functools`, `collections`,
+`heapq`, `reprlib`, `copyreg`, `itertools`), with those modules' source
+executed by the VM, not the host.
+
+New modules in `pp/` (names are the contract; internals are free):
+
+- `pp/function.py` — `Function`, modeled on `PyFunctionObject`: `__code__`,
+  `__globals__`, `__builtins__`, `__name__`, `__qualname__`, `__module__`,
+  `__doc__`, `__defaults__`, `__kwdefaults__`, `__closure__` (tuple of host
+  `types.CellType`), `__annotate__`, `__type_params__`, `__dict__`. It is a
+  descriptor (`__get__` returns a bound method) and is callable from host code
+  (`__call__` re-enters the VM), so `sorted(key=f)`, `map(f, ...)` and dunder
+  methods defined in VM code work. Argument binding follows
+  `_PyEval_MakeFrameVector` / `initialize_locals` in `ceval.c`, including the
+  CPython error messages for missing/extra/duplicate arguments.
+- `pp/generator.py` — `Generator` (`send`, `throw`, `close`, `__iter__`,
+  `__next__`, `gi_frame`, `gi_running`, `gi_code`), built on suspendable VM
+  frames. `async def` / `await` are out of scope for milestone 2.
+- `pp/builtins.py` — the VM's builtins: a dict starting as a copy of the host
+  `builtins` namespace, overriding the frame-aware ones: `__build_class__`,
+  `__import__`, `globals`, `locals`, `vars`, `exec`, `eval`, `super`
+  (zero-argument form via the calling VM frame's `__class__` cell and first
+  argument). Frames run by pp use this dict as their builtins.
+- `pp/importer.py` — the VM's import system, modeled on
+  `importlib._bootstrap`'s `_find_and_load`/`_handle_fromlist`:
+  - Module table: `vm.modules`, separate from the host `sys.modules`.
+  - Search path: the pure-Python stdlib at `vendor/cpython-3.15.2/Lib`, then the
+    script's directory, then extra paths given to the VM.
+  - `.py` modules and packages are loaded from source, compiled with
+    `pp.bytecode.compile_source`, and executed by the VM into a host
+    `types.ModuleType` (`__name__`, `__file__`, `__package__`, `__spec__`
+    (a `ModuleSpec` is fine), `__path__` for packages). Relative imports work.
+  - C modules (builtin or extension) are importable only if listed in
+    `HOST_MODULES` in `pp/importer.py`; otherwise importing them raises
+    `ImportError`, so the pure-Python fallbacks run. `HOST_MODULES` starts with
+    what the VM cannot do without (`sys`, `builtins`, `_imp`, `_thread`,
+    `_weakref`, `_io`, `posix`, `errno`, `time`, `marshal`, `_warnings`, `gc`,
+    `_abc` is NOT included: `abc` falls back to `_py_abc`) and is split into two clearly commented
+    groups: **permanent** (the host boundary) and **temporary** (C modules we
+    intend to replace with Python, e.g. `_collections`, `itertools`, `_sre`,
+    `math`). Every temporary entry is a tracked piece of debt.
+  - Accelerator modules (`_heapq`, `_bisect`, `_functools`, `_operator`,
+    `_json`, `_pickle`, `_datetime`, `_decimal`, `_collections_abc`'s friends,
+    ...) are never in `HOST_MODULES`.
+- `pp/lib/` — pure-Python replacements for C-only modules, importable under the
+  C module's name (`pp/lib/itertools.py`, `pp/lib/_collections.py`, ...). The
+  importer searches `pp/lib` before the stdlib. Milestone 2 needs at least
+  `itertools`; for others, put them in the temporary `HOST_MODULES` group.
+
+Opcodes added in milestone 2: all of the fast-locals and cell/closure
+family (LOAD_FAST*, STORE_FAST*, DELETE_FAST, LOAD_FAST_AND_CLEAR,
+LOAD_FAST_CHECK, MAKE_CELL, LOAD_DEREF, STORE_DEREF, DELETE_DEREF,
+COPY_FREE_VARS, LOAD_FROM_DICT_OR_DEREF, LOAD_FROM_DICT_OR_GLOBALS,
+LOAD_LOCALS), MAKE_FUNCTION, SET_FUNCTION_ATTRIBUTE, RETURN_GENERATOR,
+YIELD_VALUE, SEND, END_SEND, CLEANUP_THROW, CALL_FUNCTION_EX, CALL_INTRINSIC_1,
+CALL_INTRINSIC_2, LOAD_BUILD_CLASS, LOAD_SUPER_ATTR, SETUP_ANNOTATIONS,
+RAISE_VARARGS, RERAISE, PUSH_EXC_INFO, POP_EXCEPT, CHECK_EXC_MATCH,
+CHECK_EG_MATCH, WITH_EXCEPT_START, LOAD_SPECIAL, IMPORT_NAME, IMPORT_FROM,
+GET_LEN, MATCH_CLASS, MATCH_MAPPING, MATCH_SEQUENCE, MATCH_KEYS, DICT_MERGE,
+LOAD_ATTR method form (unbound function + self, per 3.15).
+
+Exceptions use the code object's exception table (`get_exception_handler` /
+the `exception_unwind` label in `ceval.c`): on a raise, find the handler for
+the instruction's offset, pop the stack to `depth`, push `lasti` if set, push
+the exception, jump to `target`; if none, pop the frame and re-raise in the
+caller. Tracebacks are not required to include VM frames yet. The VM tracks its
+own handled-exception stack (`exc_info`), used by bare `raise`, implicit
+`__context__` chaining, and `sys.exc_info()`/`sys.exception()` called from VM
+code (provide them via a VM-side `sys` override or document the gap).
+
+Known milestone 2 gaps that are acceptable: `async`, template strings
+(`BUILD_TEMPLATE`, `BUILD_INTERPOLATION`), VM frames in host tracebacks and
+`sys._getframe`, `locals()` write-back.
