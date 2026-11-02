@@ -58,6 +58,9 @@ _FAST_ITERATORS = frozenset((type(iter([])), type(iter(())), type(iter(range(1))
                              type(iter(set())), type(iter(b"")), enumerate, zip, reversed,
                              type(reversed([])), map, filter, type(iter(range(1 << 70)))))
 
+_OBJECT_NEW = object.__dict__["__new__"]
+_object_new = object.__new__
+
 _EXIT = object()  # returned by a handler to leave the eval loop
 
 CO_OPTIMIZED = 0x1
@@ -893,7 +896,38 @@ class VirtualMachine:
         stack.append(_call.PyObject_Vectorcall(callable, args, kwnames))
 
     def CALL(self, f, i):
-        self._call(f, i.arg, ())
+        nargs = i.arg
+        stack = f.stack
+        callable = stack[-2 - nargs]
+        tc = type(callable)
+        if tc is Function or tc is type:
+            # The arguments, self (or the NULL before it) prepended.
+            if stack[-1 - nargs] is NULL:
+                args = stack[-nargs:] if nargs else []
+                del stack[-2 - nargs:]
+            else:
+                args = stack[-1 - nargs:]
+                del stack[-2 - nargs:]
+            if tc is Function:
+                if callable._vm is self:
+                    # _PyFunction_Vectorcall
+                    stack.append(self.call_function(callable, args, None))
+                    return
+            elif (_PyType_Lookup(callable, "__new__") is _OBJECT_NEW
+                    and type(init := _PyType_Lookup(callable, "__init__")) is Function
+                    and init._vm is self):
+                # type_call of a class with object.__new__ and an __init__ written
+                # in Python: tp_new, then tp_init (slot_tp_init) on the new object.
+                obj = _object_new(callable)
+                args.insert(0, obj)
+                res = self.call_function(init, args, None)
+                if res is not None:
+                    raise TypeError(f"__init__() should return None, not '{Py_TYPE(res).tp_name}'")
+                stack.append(obj)
+                return
+            stack.append(_call.PyObject_Vectorcall(callable, args, None))
+            return
+        self._call(f, nargs, ())
 
     def CALL_KW(self, f, i):
         kwnames = f.stack.pop()
