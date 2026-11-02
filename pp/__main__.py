@@ -38,7 +38,13 @@ def main(argv=None) -> int:
 
     if ns.command == "run":
         sys.argv = [ns.file] + ns.args
-        run_file(ns.file)
+        try:
+            run_file(ns.file)
+        except SystemExit:
+            raise
+        except BaseException as e:
+            sys.excepthook(type(e), e, e.__traceback__)
+            return 1
     else:
         with open(ns.file, encoding="utf-8") as fh:
             code = compile_source(fh.read(), ns.file)
