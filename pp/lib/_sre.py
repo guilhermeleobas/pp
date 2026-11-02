@@ -672,7 +672,8 @@ class _State:
 
                 elif op == BRANCH:
                     lastmark = self.lastmark
-                    saved = self.mark[:lastmark + 1] if lastmark >= 0 else None
+                    saved = (self.mark[:lastmark + 1]
+                             if lastmark >= 0 and self.repeat is not None else None)
                     push((F_BRANCH, pc, ptr, lastmark, self.lastindex, saved,
                           toplevel))
                     break
@@ -696,7 +697,8 @@ class _State:
                         rptr = ptr
                         break
                     lastmark = self.lastmark
-                    saved = self.mark[:lastmark + 1] if lastmark >= 0 else None
+                    saved = (self.mark[:lastmark + 1]
+                             if lastmark >= 0 and self.repeat is not None else None)
                     chr_ = code[tail + 1] if code[tail] == LITERAL else -1
                     push((F_REPEAT_ONE, tail, ptr, count, rmin, lastmark,
                           self.lastindex, saved, toplevel, chr_))
@@ -726,7 +728,8 @@ class _State:
                     if not (rmax == MAXREPEAT or count <= rmax):
                         break
                     lastmark = self.lastmark
-                    saved = self.mark[:lastmark + 1] if lastmark >= 0 else None
+                    saved = (self.mark[:lastmark + 1]
+                             if lastmark >= 0 and self.repeat is not None else None)
                     push((F_MIN_REPEAT_ONE, pc, tail, ptr, count, rmax,
                           lastmark, self.lastindex, saved, toplevel))
                     pc = tail
@@ -790,7 +793,8 @@ class _State:
                         continue
                     self.repeat = rep.prev
                     lastmark = self.lastmark
-                    saved = self.mark[:lastmark + 1] if lastmark >= 0 else None
+                    saved = (self.mark[:lastmark + 1]
+                             if lastmark >= 0 and self.repeat is not None else None)
                     push((F_MIN_UNTIL, rep, count, ptr, lastmark,
                           self.lastindex, saved, rpc, toplevel))
 
@@ -862,7 +866,8 @@ class _State:
                     back = code[pc + 1]
                     if ptr >= back:
                         lastmark = self.lastmark
-                        saved = self.mark[:lastmark + 1] if lastmark >= 0 else None
+                        saved = (self.mark[:lastmark + 1]
+                                 if lastmark >= 0 and self.repeat is not None else None)
                         push((F_ASSERT_NOT, pc, ptr, lastmark, self.lastindex,
                               saved, toplevel))
                         ptr -= back
