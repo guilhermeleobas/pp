@@ -130,7 +130,7 @@ def run_file(path: str) -> dict
 ```
 
 - `globals` defaults to a fresh dict with `__name__ = "__main__"` and
-  `__builtins__` set to the host `builtins` module.
+  `__builtins__` set to the VM's builtins module (as CPython's `__main__`; changed in milestone 3 — previously the host module).
 - The stack holds `NULL` as a dedicated sentinel object `pp.vm.NULL`, never `None`.
 - Hitting an opcode without a handler raises
   `pp.errors.UnimplementedOpcode(opname)` (a `NotImplementedError` subclass).
