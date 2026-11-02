@@ -60,7 +60,6 @@ HOST_MODULES_TEMPORARY = frozenset({
     "select",
     "fcntl",
     "_posixsubprocess",
-    "array",
     "_socket",       # socket (needed by test.support)
     "faulthandler",  # needed by test.support / unittest runner
     "resource",      # needed by test.support
