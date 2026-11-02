@@ -48,3 +48,4 @@ Ranked by tests/modules unblocked. Size: S ≤ ½ day, M ≈ 1–2 days, L = mor
 10. **Guest-only tracebacks and `UnimplementedOpcode` as a catchable error** (see rows above) — accurate counts when a test hits a missing opcode. M
 11. **Recursion limit accounting** (guest depth, not VM frames) — `tomllib`, `ast`. S
 12. **`dis` bytecode parity** (`COPY_FREE_VARS` display, RESUME/line offsets) — 7 `dis` tests. M
+| `_sre` is pure Python (`pp/lib/_sre.py`) with limits: much slower than C; backtracking recurses per backtrack point, so `(x)*` over ~1000+ chars raises RecursionError (`test_stack_overflow`, `test_bug_418626`, `test_look_behind_overflow`); no `_validate` of the opcode list; re.LOCALE is the "C" locale; no BufferError while a match holds a buffer (`test_keep_buffer`). Fix (L): explicit-stack matcher like `sre_lib.h` | `re` CPython test (4 tests), long-subject regexes | 2026-11-02 | open |
