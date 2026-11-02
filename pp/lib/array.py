@@ -442,7 +442,8 @@ _MFORMAT_DESCR = (
 
 
 def _tp_name(obj):
-    return type(obj).__name__
+    t = type(obj)
+    return "array.array" if t is array else t.__name__
 
 
 _RESIZE_MSG = "cannot resize an array that is exporting buffers"
@@ -623,7 +624,7 @@ The following type codes are defined:
         else:
             data = b"".join(map(buf.__getitem__,
                                 _slices(range(start, stop, step), isz)))
-        return type(self)._make(d, data)
+        return array._make(d, data)
 
     @_mutator
     def __setitem__(self, i, v):
@@ -714,7 +715,7 @@ The following type codes are defined:
                             f"\"{_tp_name(other)}\") to array")
         if other._d is not self._d:
             raise TypeError("bad argument type for built-in operation")
-        return type(self)._make(self._d, self._b + other._b)
+        return array._make(self._d, self._b + other._b)
 
     @_mutator
     def __iadd__(self, other):
@@ -738,7 +739,7 @@ The following type codes are defined:
             n = 0
         if len(self._b) * n > _sys.maxsize:
             raise MemoryError
-        return type(self)._make(self._d, self._b * n)
+        return array._make(self._d, self._b * n)
 
     __rmul__ = __mul__
 
@@ -780,7 +781,9 @@ The following type codes are defined:
     def __ge__(self, other):
         return self._cmp(other, "__ge__")
 
-    __hash__ = None
+    def __hash__(self):
+        raise TypeError("unhashable type: 'array.array'" if type(self) is array
+                        else f"unhashable type: '{type(self).__name__}'")
 
     def __repr__(self):
         name = type(self).__name__
@@ -854,7 +857,11 @@ followed by imaginary part) is preserved."""
     def frombytes(self, buffer, /):
         """Appends items from the string, interpreting it as an array of machine
 values, as if it had been read from a file using the fromfile() method)."""
-        mv = memoryview(buffer)
+        try:
+            mv = memoryview(buffer)
+        except TypeError:
+            raise TypeError("a bytes-like object is required, not "
+                            f"'{type(buffer).__name__}'") from None
         try:
             if mv.itemsize != 1:
                 raise TypeError("a bytes-like object is required")
@@ -1010,10 +1017,10 @@ obtain a unicode string from an array of some other type."""
         return "".join(self.tolist())
 
     def __copy__(self):
-        return self._getslice(slice(None))
+        return array._make(self._d, bytearray(self._b))
 
     def __deepcopy__(self, unused, /):
-        return self._getslice(slice(None))
+        return array._make(self._d, bytearray(self._b))
 
     def __sizeof__(self):
         return object.__sizeof__(self) + len(self._b)
