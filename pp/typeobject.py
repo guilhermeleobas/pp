@@ -747,7 +747,7 @@ def _suppressing_attribute_error(fn, *args):
     try:
         res = fn(*args)
     except AttributeError as e:
-        err = e
+        err = True    # not the exception itself: it would form a cycle with its traceback
     if err is not None:
         _PyErr_Clear(_PyThreadState_GET())
         return NULL
@@ -1049,7 +1049,7 @@ def slot_tp_getattr_hook(self, name):
     try:
         res = _call_attribute(self, getattribute, name)
     except AttributeError as e:
-        err = e
+        err = True    # not the exception itself: it would form a cycle with its traceback
     if err is not None:
         _PyErr_Clear(_PyThreadState_GET())
         res = _call_attribute(self, getattr_, name)

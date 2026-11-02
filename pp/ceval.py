@@ -199,7 +199,7 @@ def _PyMapping_GetOptionalItem(mapping, key):
     try:
         res = PyObject_GetItem(mapping, key)
     except KeyError as e:
-        err = e
+        err = True    # not the exception itself: it would form a cycle with its traceback
     if err is not None:
         _PyErr_Clear(_PyThreadState_GET())
         return _MISSING
@@ -248,7 +248,7 @@ def _unpack(seq, before: int, after: int | None) -> list:
     try:
         it = PyObject_GetIter(seq)
     except TypeError as e:
-        err = e
+        err = True    # not the exception itself: it would form a cycle with its traceback
     if err is not None:
         # Re-raise unless the object is simply not iterable.
         _PyErr_Clear(_PyThreadState_GET())
@@ -645,7 +645,7 @@ class VirtualMachine:
         try:
             PyObject_DelItem(ns, name)
         except KeyError as e:
-            err = e
+            err = True    # not the exception itself: it would form a cycle with its traceback
         if err is not None:
             _PyErr_Clear(_PyThreadState_GET())
             raise _name_error(name)

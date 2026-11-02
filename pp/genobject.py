@@ -357,7 +357,7 @@ def gen_close(gen):
     try:
         kind, result = gen_send_ex2(gen, None, exc)
     except GeneratorExit as e:
-        caught = e
+        caught = True    # not the exception itself: cycle with its traceback
     if caught is not None:
         _PyErr_Clear(_PyThreadState_GET())      # ignore this error
         return None

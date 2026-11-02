@@ -88,7 +88,7 @@ def PyObject_GetOptionalAttr(v, name):
     try:
         result = getattro(v, name)
     except AttributeError as e:
-        err = e
+        err = True    # not the exception itself: it would form a cycle with its traceback
     if err is not None:
         _PyErr_Clear(_PyThreadState_GET())
         return NULL
@@ -155,7 +155,7 @@ def _call_descr_get(f, descr, obj, tp, suppress):
     try:
         res = f(descr, obj, type(obj))
     except AttributeError as e:
-        err = e
+        err = True    # not the exception itself: it would form a cycle with its traceback
     if err is not None:
         _PyErr_Clear(_PyThreadState_GET())
         return NULL

@@ -420,7 +420,7 @@ def _PySequence_IterSearch(seq, obj, operation):
     try:
         it = PyObject_GetIter(seq)
     except TypeError as e:
-        err = e
+        err = True    # not the exception itself: it would form a cycle with its traceback
     if err is not None:
         _PyErr_Clear(_PyThreadState_GET())
         raise _type_error("argument of type '%.200s' is not a container or iterable", seq)
@@ -483,7 +483,7 @@ def PyIter_Next(iterator):
     try:
         return f(iterator)
     except StopIteration as e:
-        stop = e
+        stop = True    # not the exception itself: it would form a cycle with its traceback
     _PyErr_Clear(_PyThreadState_GET())
     return NULL
 
@@ -505,11 +505,10 @@ def PyIter_Send(iterator, arg):
         else:
             result = _call.PyObject_CallOneArg(PyObject_GetAttr(iterator, "send"), arg)
     except StopIteration as e:
-        stop = e
-    if stop is not None:
-        # _PyGen_FetchStopIterationValue
-        _PyErr_Clear(_PyThreadState_GET())
-        return PYGEN_RETURN, stop.value
+        stop = e.value
+        result = NULL
+        _PyErr_Clear(_PyThreadState_GET())     # _PyGen_FetchStopIterationValue
+        return PYGEN_RETURN, stop
     return PYGEN_NEXT, result
 
 
@@ -541,7 +540,7 @@ def seqiter_next(it):
     try:
         result = Py_TYPE(seq).sq_item(seq, it.it_index)
     except (IndexError, StopIteration) as e:
-        err = e
+        err = True    # not the exception itself: it would form a cycle with its traceback
     if err is not None:
         _PyErr_Clear(_PyThreadState_GET())
         it.it_seq = None
