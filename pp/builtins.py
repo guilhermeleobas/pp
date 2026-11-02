@@ -71,16 +71,6 @@ def make_builtins(vm) -> types.ModuleType:
         cell = vm.run_class_body(func, namespace)
         if bases is not orig_bases:
             namespace["__orig_bases__"] = orig_bases
-        # type.__new__ only special-cases host functions (PyFunction_Check);
-        # apply the same implicit wrapping to VM functions.
-        for attr, wrap in (("__new__", staticmethod), ("__init_subclass__", classmethod),
-                           ("__class_getitem__", classmethod)):
-            try:
-                v = namespace[attr]
-            except KeyError:
-                continue
-            if type(v) is Function:
-                namespace[attr] = wrap(v)
         cls = vm.call(meta, (name, bases, namespace), kwds)
         if isinstance(cls, type) and isinstance(cell, types.CellType):
             try:
@@ -162,7 +152,7 @@ def make_builtins(vm) -> types.ModuleType:
         if not isinstance(globals_, dict):
             raise TypeError(f"{fname}() globals must be a dict, not {type(globals_).__name__}")
         if "__builtins__" not in globals_:
-            globals_["__builtins__"] = mod
+            globals_["__builtins__"] = ns  # the dict, as PyEval_GetBuiltins() returns
         return globals_, locals_
 
     def exec(source, globals=None, locals=None, /, *, closure=None):

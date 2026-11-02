@@ -5,6 +5,9 @@ import types
 CREATED, SUSPENDED, SUSPENDED_YIELD_FROM, EXECUTING, CLEARED = range(5)
 
 
+_THROW_HERE = object()
+
+
 class ExcInfo:
     """_PyErr_StackItem: one entry of the handled-exception stack."""
     __slots__ = ("exc_value", "previous")
@@ -61,6 +64,11 @@ class Generator:
         return self._state == EXECUTING
 
     @property
+    def gi_state(self):
+        return ("GEN_CREATED", "GEN_SUSPENDED", "GEN_SUSPENDED", "GEN_RUNNING",
+                "GEN_CLOSED")[self._state]
+
+    @property
     def gi_suspended(self):
         return self._state in (SUSPENDED, SUSPENDED_YIELD_FROM)
 
@@ -82,6 +90,7 @@ class Generator:
             raise ValueError(f"{self._kind} already executing")
         if state == CLEARED:
             if exc is not None:
+                self._vm._raised = exc  # gen_set_exception: restored, not chained
                 raise exc
             return True, None
         if state == CREATED and value is not None and exc is None:
@@ -92,6 +101,8 @@ class Generator:
         self._exc_state.previous = vm.exc_info
         vm.exc_info = self._exc_state
         self._state = EXECUTING
+        if exc is not None and self._exc_state.exc_value is not None:
+            vm._chain(exc)  # _PyErr_ChainStackItem: only against our own exc state
         try:
             result = vm.run_frame(frame, exc)
         except BaseException:
@@ -137,7 +148,9 @@ class Generator:
         if state == EXECUTING:
             raise ValueError(f"{self._kind} already executing")
         if state == CLEARED:
-            raise _normalize_throw(typ, val, tb)
+            exc = _normalize_throw(typ, val, tb)
+            self._vm._raised = exc  # gen_set_exception: restored, not chained
+            raise exc
         if state == SUSPENDED_YIELD_FROM:
             yf = self.gi_frame.stack[-2]
             is_genexit = (isinstance(typ, type) and issubclass(typ, GeneratorExit)) or \
@@ -145,32 +158,34 @@ class Generator:
             # Never resume the frame from inside a host `except` block: the
             # host would chain its handled exception onto everything raised.
             err = None
-            if is_genexit and close_on_genexit:
-                try:
-                    _close_iter(yf)
-                except BaseException as e:
-                    err = e
-            else:
-                if isinstance(yf, Generator):
-                    try:
-                        return yf._throw(close_on_genexit, typ, val, tb)
-                    except BaseException as e:
-                        err = e
-                else:
-                    meth = getattr(yf, "throw", None)
-                    if meth is not None:
-                        args = [typ]
-                        if val is not None:
-                            args.append(val)
-                            if tb is not None:
-                                args.append(tb)
-                        try:
-                            return meth(*args)
-                        except BaseException as e:
-                            err = e
+            self._state = EXECUTING  # the delegating generator is running meanwhile
+            try:
+                ret = self._delegate_throw(yf, is_genexit and close_on_genexit,
+                                           close_on_genexit, typ, val, tb)
+            except BaseException as e:
+                err = e
+            self._state = state
             if err is not None:
                 return self._throw_into(err)
+            if ret is not _THROW_HERE:
+                return ret
         return self._throw_into(_normalize_throw(typ, val, tb))
+
+    def _delegate_throw(self, yf, close_first, close_on_genexit, typ, val, tb):
+        if close_first:
+            _close_iter(yf)
+            return _THROW_HERE
+        if isinstance(yf, Generator):
+            return yf._throw(close_on_genexit, typ, val, tb)
+        meth = getattr(yf, "throw", None)
+        if meth is None:
+            return _THROW_HERE
+        args = [typ]
+        if val is not None:
+            args.append(val)
+            if tb is not None:
+                args.append(tb)
+        return meth(*args)
 
     def _throw_into(self, exc):
         return self._finish(*self._resume(None, exc))
@@ -187,10 +202,12 @@ class Generator:
             raise ValueError(f"{self._kind} already executing")
         exc = None
         if state == SUSPENDED_YIELD_FROM:
+            self._state = EXECUTING
             try:
                 _close_iter(self.gi_frame.stack[-2])
             except BaseException as e:
                 exc = e
+            self._state = state
         if exc is None:
             exc = GeneratorExit()
         try:

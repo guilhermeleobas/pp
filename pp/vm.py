@@ -129,6 +129,27 @@ def _name_error(name: str) -> NameError:
     return NameError(f"name '{name}' is not defined", name=name)
 
 
+_TYPE_NEW = type.__new__
+_IMPLICIT_WRAPPERS = (("__new__", staticmethod), ("__init_subclass__", classmethod),
+                      ("__class_getitem__", classmethod))
+
+
+def _wrap_type_namespace(ns):
+    """type_new_set_attrs (Objects/typeobject.c) turns plain functions named
+    __new__ / __init_subclass__ / __class_getitem__ into static/class methods,
+    but only checks PyFunction_Check; do the same for VM functions. Like
+    type.__new__, works on a copy and leaves the caller's namespace alone."""
+    if not isinstance(ns, dict):
+        return ns
+    repl = {name: wrap(ns[name]) for name, wrap in _IMPLICIT_WRAPPERS
+            if type(ns.get(name)) is Function}
+    if not repl:
+        return ns
+    ns = dict(ns)
+    ns.update(repl)
+    return ns
+
+
 def _type_fullname(tp: type) -> str:
     mod = tp.__module__
     if mod in ("builtins", "__main__") or not isinstance(mod, str):
@@ -352,6 +373,7 @@ class VirtualMachine:
 
         self.frame: Frame | None = None
         self.exc_info = ExcInfo()
+        self._raised = None  # exception being re-raised/propagated (not to be chained)
         self.path: list = list(path or [])
         self.modules: dict = {}
         self.builtins_module = make_builtins(self)
@@ -375,11 +397,11 @@ class VirtualMachine:
             raise UnimplementedOpcode(opname)
         return handler
 
-    def add_path(self, directory: str) -> None:
-        """Append an import search directory (searched after pp/lib and the stdlib)."""
+    def add_script_dir(self, directory: str) -> None:
+        """Search `directory` after pp/lib and the stdlib, before the extra `path`."""
         if directory not in self.path:
-            self.path.append(directory)
-        self.importer.add_path(directory)
+            self.path.insert(0, directory)
+        self.importer.add_script_dir(directory)
 
     def builtins_for(self, globals: dict) -> dict:
         return builtins_from_globals(globals, self.builtins)
@@ -432,6 +454,11 @@ class VirtualMachine:
             return self.call_function(callable, args, kwargs)
         if tp is types.MethodType and type(callable.__func__) is Function:
             return self.call_function(callable.__func__, (callable.__self__, *args), kwargs)
+        if len(args) == 3 and isinstance(callable, type) and issubclass(callable, type) \
+                and callable.__new__ == _TYPE_NEW:
+            args = (args[0], args[1], _wrap_type_namespace(args[2]))
+        elif len(args) == 4 and callable is _TYPE_NEW:
+            args = (args[0], args[1], args[2], _wrap_type_namespace(args[3]))
         if kwargs:
             return callable(*args, **kwargs)
         return callable(*args)
@@ -461,7 +488,10 @@ class VirtualMachine:
                         raise
                     except BaseException as e:
                         exc = e
-                self._chain(exc)
+                        if e is not self._raised:
+                            # Raised by host code during this instruction:
+                            # _PyErr_SetObject chains it to the handled exception.
+                            self._chain(e)
                 # exception_unwind: find the handler for the faulting instruction.
                 entry = None
                 for e in decoded.exception_table:
@@ -469,6 +499,7 @@ class VirtualMachine:
                         entry = e
                         break
                 if entry is None:
+                    self._raised = exc
                     raise exc
                 del stack[entry.depth:]
                 if entry.lasti:
@@ -489,12 +520,15 @@ class VirtualMachine:
             info = info.previous
         return None
 
-    def _chain(self, exc, force: bool = False) -> None:
-        """Implicit __context__ chaining, as in _PyErr_SetObject."""
-        top = self.topmost_exception()
+    def _chain(self, exc, top=_MISSING) -> None:
+        """Implicit __context__ chaining at a raise site, as in _PyErr_SetObject.
+
+        Only fresh raises are chained: re-raises (RERAISE, bare `raise`) and
+        exceptions propagating out of a callee VM frame are marked in
+        `self._raised` and left alone."""
+        if top is _MISSING:
+            top = self.topmost_exception()
         if top is None or top is exc:
-            return
-        if not force and exc.__context__ is not None:
             return
         o = top
         seen = set()
@@ -847,6 +881,7 @@ class VirtualMachine:
     def CLEANUP_THROW(self, f, i):
         exc_value = f.stack.pop()
         if not isinstance(exc_value, StopIteration):
+            self._raised = exc_value
             raise exc_value
         f.stack.pop()            # last_sent_val
         null = f.stack.pop()
@@ -864,6 +899,7 @@ class VirtualMachine:
             top = self.topmost_exception()
             if top is None:
                 raise RuntimeError("No active exception to reraise")
+            self._raised = top
             raise top
         if isinstance(exc, type) and issubclass(exc, BaseException):
             value = exc()
@@ -885,13 +921,15 @@ class VirtualMachine:
             else:
                 raise TypeError("exception causes must derive from BaseException")
             value.__cause__ = fixed
-        self._chain(value, force=True)
+        self._chain(value)
+        self._raised = value
         raise value
 
     def RERAISE(self, f, i):
         exc = f.stack.pop()
         if i.arg:
             f.lasti = f.stack[-i.arg]
+        self._raised = exc
         raise exc
 
     def PUSH_EXC_INFO(self, f, i):
@@ -1373,15 +1411,20 @@ def run_file(path: str, vm: VirtualMachine | None = None) -> dict:
         source = fh.read()
     if vm is None:
         vm = VirtualMachine()
-    vm.add_path(os.path.dirname(path))
+    vm.add_script_dir(os.path.dirname(path))
     globals = _main_module(vm).__dict__
+    globals["__builtins__"] = vm.builtins_module  # like CPython's __main__
     globals["__file__"] = path
+    from pp.importer import SourceLoader
+    globals["__loader__"] = SourceLoader(vm.importer, "__main__", path)
     return run_source(source, path, globals, vm)
 
 
 def _main_module(vm: VirtualMachine) -> types.ModuleType:
     """A fresh `__main__` module registered in vm.modules (unittest.main() needs it)."""
     mod = types.ModuleType("__main__")
+    # DESIGN.md: run_source's default globals carry the host `builtins` module
+    # (frames still run with the VM's builtins); run_file uses the VM's module.
     mod.__dict__["__builtins__"] = _builtins
     vm.modules["__main__"] = mod
     return mod

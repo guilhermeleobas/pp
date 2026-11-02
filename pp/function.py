@@ -45,7 +45,7 @@ class Function:
             return self
         return types.MethodType(self, obj)
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, /, *args, **kwargs):
         return self._vm.call_function(self, args, kwargs)
 
     def __repr__(self):
@@ -77,17 +77,23 @@ class Function:
         self._annotations = None
 
 
-def _get_module(self):
-    return self._module
+class _ModuleAttr(str):
+    """`Function.__module__`: equals 'builtins' when read from the class (type
+    attribute lookup returns the raw dict entry), and is a data descriptor for the
+    per-function module name on instances."""
 
+    def __get__(self, obj, owner=None):
+        if obj is None:
+            return self
+        return obj._module
 
-def _set_module(self, value):
-    self._module = value
+    def __set__(self, obj, value):
+        obj._module = value
 
 
 # Installed after class creation: a `__module__` slot would conflict with the
 # class's own `__module__` entry.
-Function.__module__ = property(_get_module, _set_module)
+Function.__module__ = _ModuleAttr("builtins")
 
 
 # --- argument binding: initialize_locals() in Python/ceval.c ---

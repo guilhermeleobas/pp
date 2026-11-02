@@ -155,7 +155,7 @@ class VMFinder:
         return self._importer.find_spec(name, path)
 
     def invalidate_caches(self):
-        pass
+        self._importer._dir_cache.clear()
 
     def __repr__(self):
         return "<pp.importer.VMFinder>"
@@ -204,15 +204,18 @@ class _VMFrameView:
 class Importer:
     def __init__(self, vm):
         self.vm = vm
+        self._dir_cache = {}
+        # Search order (DESIGN.md): pp/lib, the stdlib, the script's directory
+        # (inserted by run_file), then the VM's extra `path`.
         self.sys_path = [PP_LIB, STDLIB] + list(vm.path)
         self.sys_module = self._make_sys()
         vm.modules["sys"] = self.sys_module
         vm.modules["_imp"] = self._make_imp()
         vm.modules["builtins"] = vm.builtins_module
 
-    def add_path(self, directory):
+    def add_script_dir(self, directory):
         if directory not in self.sys_path:
-            self.sys_path.append(directory)
+            self.sys_path.insert(2, directory)
 
     # --- the VM's _imp module: no frozen modules, builtins only from HOST_MODULES ---
 
@@ -405,13 +408,35 @@ class Importer:
         for directory in dirs:
             if not isinstance(directory, str):
                 continue
-            pkg_init = os.path.join(directory, tail, "__init__.py")
-            if os.path.isfile(pkg_init):
-                return pkg_init, True
-            src = os.path.join(directory, tail + ".py")
-            if os.path.isfile(src):
-                return src, False
+            entries = self._listdir(directory)
+            if tail in entries:
+                pkg_dir = os.path.join(directory, tail)
+                if "__init__.py" in self._listdir(pkg_dir) \
+                        and os.path.isfile(os.path.join(pkg_dir, "__init__.py")):
+                    return os.path.join(pkg_dir, "__init__.py"), True
+            if tail + ".py" in entries:
+                src = os.path.join(directory, tail + ".py")
+                if os.path.isfile(src):
+                    return src, False
         return None, False
+
+    def _listdir(self, directory):
+        """Directory contents, cached until the directory's mtime changes.
+        Membership tests on the listing make lookups case-sensitive even on
+        case-insensitive filesystems, like FileFinder."""
+        try:
+            mtime = os.stat(directory).st_mtime
+        except OSError:
+            return frozenset()
+        cached = self._dir_cache.get(directory)
+        if cached is not None and cached[0] == mtime:
+            return cached[1]
+        try:
+            entries = frozenset(os.listdir(directory))
+        except OSError:
+            entries = frozenset()
+        self._dir_cache[directory] = (mtime, entries)
+        return entries
 
     def find_spec(self, name, path=None):
         filename, is_package = self._find_source(name, path)
@@ -421,7 +446,8 @@ class Importer:
             # PEP 420 namespace package: directories without __init__.py.
             tail = name.rpartition(".")[2]
             dirs = [os.path.join(d, tail) for d in (self.sys_path if path is None else path)
-                    if isinstance(d, str) and os.path.isdir(os.path.join(d, tail))]
+                    if isinstance(d, str) and tail in self._listdir(d)
+                    and os.path.isdir(os.path.join(d, tail))]
             if dirs:
                 spec = ModuleSpec(name, None)
                 spec.submodule_search_locations = dirs
