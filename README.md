@@ -31,6 +31,7 @@ stdlib module, how many of CPython's own tests pass under pp. Known blockers are
 
 ## Docs
 
-- [ROADMAP.md](ROADMAP.md) — what is done, in review, and next.
+- [ROADMAP.md](ROADMAP.md) — what is done, in review, next, and missing.
+- [CONTRIBUTING.md](CONTRIBUTING.md) — rules for contributors (all AI agents).
 - [DESIGN.md](DESIGN.md) — architecture, host boundary, milestones.
 - [WORKFLOW.md](WORKFLOW.md) — how the work is organized.
