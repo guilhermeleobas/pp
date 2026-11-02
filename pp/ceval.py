@@ -1361,7 +1361,13 @@ class VirtualMachine:
         _PyDict_Update(f.stack[-i.arg], update)
 
     def UNPACK_SEQUENCE(self, f, i):
-        vals = _unpack(f.stack.pop(), i.arg, None)
+        seq = f.stack.pop()
+        tp = type(seq)
+        if (tp is tuple or tp is list) and len(seq) == i.arg:
+            # UNPACK_SEQUENCE_TUPLE / _LIST: the items of an exact tuple or list.
+            f.stack.extend(seq[::-1])
+            return
+        vals = _unpack(seq, i.arg, None)
         f.stack.extend(reversed(vals))
 
     def UNPACK_EX(self, f, i):
