@@ -13,6 +13,8 @@ Branches below are pushed to GitHub.
   `match`.
 - Milestone 3: CPython-mirrored type slots and abstract layer
   (`typeobject`, `abstract`, `call`, `ceval`, `genobject`, `funcobject`).
+- Milestone 3 regression fixes: per-type slot data in a VM-side weak table,
+  CPython-style method cache, warnings through the guest `warnings` module.
 - Host-boundary import guard test (`tests/test_host_boundary.py`).
 - Pure-Python `_collections` (deque, defaultdict, OrderedDict), `array`,
   `_weakref` and `gc` in `pp/lib` (weak refs never die; `gc.collect()` frees
@@ -26,11 +28,10 @@ Branches below are pushed to GitHub.
 
 | Branch | What | Review | Gate | Next step |
 |---|---|---|---|---|
-| `impl/m3-fixes` | Milestone 3 regression fixes; CPython-style version-tag type cache; no new host imports; warnings go through the guest `warnings` | round 3: merge (storage hack aside) | round 3: no drops except `difflib` timeout (perf) | round 4: slot data in a VM-side weak table; then judge |
 | `impl/sre` | Pure-Python `_sre` regex engine (`re` fully in Python) | merge, with a limit: `RecursionError` on group repeats over ~600 chars | clean vs `main` | rebase after `impl/m3-fixes` (conflicts); explicit-stack matcher on `impl/sre-stack` (9bf8304, test_re 160/168) |
 
-Merge order: `impl/m3-fixes` → `impl/sre` (rebased) → `impl/sre-stack`;
-regenerate the dashboard after each.
+Merge order: `impl/sre-stack` (includes `impl/sre`), then `impl/accel` and
+`perf/eval-loop`; regenerate the dashboard after each.
 
 ## Next
 
