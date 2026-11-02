@@ -153,20 +153,24 @@ def PyErr_GivenExceptionMatches(err, exc) -> bool:
 
 def PyErr_WarnEx(category, message, stack_level) -> None:
     """Issue a warning attributed to the `stack_level`-th VM frame (1 is the
-    running one), through the host's `_warnings` (shared with the VM's `warnings`)."""
-    import _warnings
+    running one), through the guest's `warnings` module (`warn_explicit`, as
+    `warn_explicit` of `_warnings.c` calls the Python implementation's filters)."""
     tstate = _PyThreadState_GET()
-    frame = tstate.vm.frame if tstate is not None and tstate.vm is not None else None
+    vm = tstate.vm if tstate is not None else None
+    if vm is None:
+        return
+    warnings = vm.importer.import_module("warnings")
+    frame = vm.frame
     for _ in range(stack_level - 1):
         if frame is not None and frame.previous is not None:
             frame = frame.previous
     if frame is None:
-        _warnings.warn_explicit(message, category, "sys", 1)
+        warnings.warn_explicit(message, category, "sys", 1)
         return
     globals_ = frame.globals
     registry = globals_.get("__warningregistry__")
     if registry is None:
         registry = globals_["__warningregistry__"] = {}
     module = globals_.get("__name__", "<string>")
-    _warnings.warn_explicit(message, category, frame.code.co_filename, frame.lineno() or 1,
-                            module, registry, globals_)
+    warnings.warn_explicit(message, category, frame.code.co_filename, frame.lineno() or 1,
+                           module, registry, globals_)
