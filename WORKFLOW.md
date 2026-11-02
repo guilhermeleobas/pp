@@ -29,6 +29,14 @@ same branch · `REJECT`: branch dropped, task re-briefed (possibly on Opus).
    `tools/test_results.json`. Only the orchestrator regenerates them on `main`.
 4. Final report states the branch name and the last commit hash.
 
+## Blockers
+
+Don't stall on a blocker. When something blocks a task (missing feature,
+unexplained failure, environment issue, a decision that needs the user),
+the agent notes it under "Blockers" in its report and continues with the rest
+of the task, skipping or parking the blocked part. The orchestrator adds it to
+`BLOCKERS.md` and retries the parked work once the blocker is resolved.
+
 ## Gate
 
 - `pixi run test` green.
