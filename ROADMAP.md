@@ -26,7 +26,7 @@ Work is paused as of 2026-11-02. Branches below are pushed to GitHub.
 | `impl/m3-fixes` | Milestone 3 regression fixes; CPython-style version-tag type cache; no new host imports; warnings go through the guest `warnings` | round 1: fix (all items addressed in round 2) | round 2: no drops except `difflib` timeout (perf) | re-review round 2, judge, merge |
 | `impl/collections` | Pure-Python `_collections` (deque, defaultdict, OrderedDict, views) | round 1: fix (all items addressed) | round 2: `pprint` back to 77/77 | re-review, judge, merge |
 | `impl/sre` | Pure-Python `_sre` regex engine (`re` fully in Python) | merge, with a limit: `RecursionError` on group repeats over ~600 chars | clean vs `main` | judge; then explicit-stack matcher (see below) |
-| `impl/array-weakref` | Pure-Python `array`, `_weakref`, `gc` | fix: drop the refs registry, array speed (~2000× slower), error messages | weakref/object-death drops (accepted) | finish fix round, re-review, judge |
+| `impl/array-weakref` | Pure-Python `array`, `_weakref`, `gc` | round 1: fix (registry, array speed, error messages; addressed in round 2) | weakref/object-death drops (accepted) | re-review round 2, judge, merge |
 
 Merge order: `impl/m3-fixes` → `impl/collections` → `impl/sre` →
 `impl/array-weakref`; regenerate the dashboard after each.
