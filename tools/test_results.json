@@ -1,132 +1,441 @@
 {
  "abc": {
   "detail": "",
+  "errors": 0,
+  "failures": 0,
   "passed": 76,
   "result": "pass",
+  "skipped": 0,
   "total": 76
  },
  "argparse": {
   "detail": "FAILED (failures=4, errors=2, skipped=1)",
+  "errors": 2,
+  "failures": 4,
   "passed": 1956,
   "result": "partial",
+  "skipped": 1,
   "total": 1963
  },
+ "array": {
+  "detail": "FAILED (failures=19, skipped=51)",
+  "errors": 0,
+  "failures": 19,
+  "passed": 1028,
+  "result": "partial",
+  "skipped": 51,
+  "total": 1098
+ },
+ "ast": {
+  "detail": "FAILED (failures=5, errors=1, skipped=1)",
+  "errors": 1,
+  "failures": 5,
+  "passed": 213,
+  "result": "partial",
+  "skipped": 1,
+  "total": 220
+ },
+ "base64": {
+  "detail": "FAILED (failures=1)",
+  "errors": 0,
+  "failures": 1,
+  "passed": 66,
+  "result": "partial",
+  "skipped": 0,
+  "total": 67
+ },
+ "bisect": {
+  "detail": "FAILED (errors=23)",
+  "errors": 23,
+  "failures": 0,
+  "passed": 23,
+  "result": "partial",
+  "skipped": 0,
+  "total": 46
+ },
+ "calendar": {
+  "detail": "FAILED (failures=1, skipped=17)",
+  "errors": 0,
+  "failures": 1,
+  "passed": 68,
+  "result": "partial",
+  "skipped": 17,
+  "total": 86
+ },
  "collections": {
-  "detail": "opcode GET_AWAITABLE is not implemented",
+  "detail": "E",
+  "errors": 0,
+  "failures": 0,
   "passed": 0,
-  "result": "blocked",
+  "result": "fail",
+  "skipped": 0,
   "total": 0
+ },
+ "colorsys": {
+  "detail": "",
+  "errors": 0,
+  "failures": 0,
+  "passed": 8,
+  "result": "pass",
+  "skipped": 0,
+  "total": 8
+ },
+ "configparser": {
+  "detail": "OK (skipped=5)",
+  "errors": 0,
+  "failures": 0,
+  "passed": 378,
+  "result": "partial",
+  "skipped": 5,
+  "total": 383
  },
  "contextlib": {
   "detail": "E",
+  "errors": 0,
+  "failures": 0,
   "passed": 0,
   "result": "fail",
+  "skipped": 0,
   "total": 0
+ },
+ "copy": {
+  "detail": "FAILED (failures=4, errors=1)",
+  "errors": 1,
+  "failures": 4,
+  "passed": 79,
+  "result": "partial",
+  "skipped": 0,
+  "total": 84
  },
  "copyreg": {
   "detail": "",
+  "errors": 0,
+  "failures": 0,
   "passed": 6,
   "result": "pass",
+  "skipped": 0,
   "total": 6
  },
- "difflib": {
-  "detail": "FAILED (failures=25)",
-  "passed": 36,
+ "csv": {
+  "detail": "ModuleNotFoundError: Standard library module '_csv' was not found",
+  "errors": 0,
+  "failures": 0,
+  "passed": 0,
+  "result": "fail",
+  "skipped": 0,
+  "total": 0
+ },
+ "dataclasses": {
+  "detail": "FAILED (failures=20, errors=37, skipped=1)",
+  "errors": 37,
+  "failures": 20,
+  "passed": 227,
   "result": "partial",
-  "total": 61
+  "skipped": 1,
+  "total": 285
+ },
+ "datetime": {
+  "detail": ">600s",
+  "result": "timeout"
+ },
+ "decimal": {
+  "detail": "FAILED (failures=433, skipped=203)",
+  "errors": 0,
+  "failures": 433,
+  "passed": 0,
+  "result": "fail",
+  "skipped": 203,
+  "total": 587
+ },
+ "difflib": {
+  "detail": ">600s",
+  "result": "timeout"
+ },
+ "dis": {
+  "detail": "FAILED (failures=7, skipped=24)",
+  "errors": 0,
+  "failures": 7,
+  "passed": 114,
+  "result": "partial",
+  "skipped": 24,
+  "total": 145
  },
  "enum": {
   "detail": "FAILED (failures=10, errors=5, skipped=4)",
+  "errors": 5,
+  "failures": 10,
   "passed": 1068,
   "result": "partial",
+  "skipped": 4,
   "total": 1087
  },
  "fnmatch": {
   "detail": "",
+  "errors": 0,
+  "failures": 0,
   "passed": 24,
   "result": "pass",
+  "skipped": 0,
   "total": 24
  },
+ "fractions": {
+  "detail": "",
+  "errors": 0,
+  "failures": 0,
+  "passed": 50,
+  "result": "pass",
+  "skipped": 0,
+  "total": 50
+ },
  "functools": {
-  "detail": "FAILED (failures=7, errors=4, skipped=125)",
-  "passed": 202,
+  "detail": "FAILED (failures=10, errors=6, skipped=125)",
+  "errors": 6,
+  "failures": 10,
+  "passed": 197,
   "result": "partial",
+  "skipped": 125,
   "total": 338
+ },
+ "gc": {
+  "detail": "FAILED (failures=33, errors=1, skipped=8)",
+  "errors": 1,
+  "failures": 33,
+  "passed": 19,
+  "result": "partial",
+  "skipped": 8,
+  "total": 61
+ },
+ "glob": {
+  "detail": "OK (skipped=2)",
+  "errors": 0,
+  "failures": 0,
+  "passed": 20,
+  "result": "partial",
+  "skipped": 2,
+  "total": 22
+ },
+ "graphlib": {
+  "detail": "",
+  "errors": 0,
+  "failures": 0,
+  "passed": 17,
+  "result": "pass",
+  "skipped": 0,
+  "total": 17
  },
  "heapq": {
   "detail": "FAILED (failures=2, skipped=34)",
+  "errors": 0,
+  "failures": 2,
   "passed": 33,
   "result": "partial",
+  "skipped": 34,
   "total": 69
+ },
+ "html": {
+  "detail": "",
+  "errors": 0,
+  "failures": 0,
+  "passed": 2,
+  "result": "pass",
+  "skipped": 0,
+  "total": 2
+ },
+ "inspect": {
+  "detail": "FAILED (errors=1)",
+  "errors": 1,
+  "failures": 0,
+  "passed": 0,
+  "result": "fail",
+  "skipped": 0,
+  "total": 1
+ },
+ "ipaddress": {
+  "detail": "FAILED (failures=1, errors=6)",
+  "errors": 6,
+  "failures": 1,
+  "passed": 205,
+  "result": "partial",
+  "skipped": 0,
+  "total": 212
  },
  "itertools": {
   "detail": ">600s",
   "result": "timeout"
  },
+ "json": {
+  "detail": "AttributeError: 'NoneType' object has no attribute 'JSONDecodeError' and no __dict__ for setting new attributes",
+  "errors": 0,
+  "failures": 0,
+  "passed": 0,
+  "result": "fail",
+  "skipped": 0,
+  "total": 0
+ },
  "keyword": {
   "detail": "",
+  "errors": 0,
+  "failures": 0,
   "passed": 11,
   "result": "pass",
+  "skipped": 0,
   "total": 11
  },
  "operator": {
-  "detail": "FAILED (errors=3, skipped=59)",
-  "passed": 50,
+  "detail": "FAILED (failures=1, errors=3, skipped=59)",
+  "errors": 3,
+  "failures": 1,
+  "passed": 49,
   "result": "partial",
+  "skipped": 59,
   "total": 112
+ },
+ "optparse": {
+  "detail": "FAILED (failures=2, skipped=1)",
+  "errors": 0,
+  "failures": 2,
+  "passed": 152,
+  "result": "partial",
+  "skipped": 1,
+  "total": 155
+ },
+ "posixpath": {
+  "detail": "FAILED (failures=2, skipped=5)",
+  "errors": 0,
+  "failures": 2,
+  "passed": 89,
+  "result": "partial",
+  "skipped": 5,
+  "total": 96
  },
  "pprint": {
   "detail": "",
+  "errors": 0,
+  "failures": 0,
   "passed": 77,
   "result": "pass",
+  "skipped": 0,
   "total": 77
+ },
+ "queue": {
+  "detail": "FAILED (failures=1, skipped=87)",
+  "errors": 0,
+  "failures": 1,
+  "passed": 77,
+  "result": "partial",
+  "skipped": 87,
+  "total": 165
+ },
+ "random": {
+  "detail": "FAILED (errors=14, skipped=2)",
+  "errors": 14,
+  "failures": 0,
+  "passed": 100,
+  "result": "partial",
+  "skipped": 2,
+  "total": 116
  },
  "reprlib": {
   "detail": "FAILED (errors=1, skipped=2)",
+  "errors": 1,
+  "failures": 0,
   "passed": 30,
   "result": "partial",
+  "skipped": 2,
   "total": 33
+ },
+ "shlex": {
+  "detail": "",
+  "errors": 0,
+  "failures": 0,
+  "passed": 45,
+  "result": "pass",
+  "skipped": 0,
+  "total": 45
+ },
+ "statistics": {
+  "detail": ">600s",
+  "result": "timeout"
  },
  "string": {
   "detail": "FAILED (errors=54)",
+  "errors": 54,
+  "failures": 0,
   "passed": 1,
   "result": "partial",
+  "skipped": 0,
   "total": 55
  },
  "textwrap": {
   "detail": "",
+  "errors": 0,
+  "failures": 0,
   "passed": 68,
   "result": "pass",
+  "skipped": 0,
   "total": 68
  },
- "traceback": {
-  "detail": "FAILED (failures=50, errors=149, skipped=133)",
-  "passed": 109,
+ "tomllib": {
+  "detail": "FAILED (failures=1, errors=3)",
+  "errors": 3,
+  "failures": 1,
+  "passed": 14,
   "result": "partial",
+  "skipped": 0,
+  "total": 18
+ },
+ "traceback": {
+  "detail": "FAILED (failures=53, errors=149, skipped=133)",
+  "errors": 149,
+  "failures": 53,
+  "passed": 106,
+  "result": "partial",
+  "skipped": 133,
   "total": 441
  },
  "types": {
   "detail": "ModuleNotFoundError: Standard library module '_datetime' was not found",
+  "errors": 0,
+  "failures": 0,
   "passed": 0,
   "result": "fail",
+  "skipped": 0,
+  "total": 0
+ },
+ "typing": {
+  "detail": "TypeError: Parameters to Generic[...] must all be type variables or parameter specification variables.",
+  "errors": 0,
+  "failures": 0,
+  "passed": 0,
+  "result": "fail",
+  "skipped": 0,
   "total": 0
  },
  "unittest": {
-  "detail": "opcode GET_AWAITABLE is not implemented",
+  "detail": "E",
+  "errors": 0,
+  "failures": 0,
   "passed": 0,
-  "result": "blocked",
+  "result": "fail",
+  "skipped": 0,
   "total": 0
  },
  "warnings": {
   "detail": "FAILED (failures=64, errors=15, skipped=6)",
+  "errors": 15,
+  "failures": 64,
   "passed": 120,
   "result": "partial",
+  "skipped": 6,
   "total": 205
  },
  "weakref": {
-  "detail": "FAILED (failures=10, skipped=2)",
-  "passed": 128,
+  "detail": "FAILED (failures=49, errors=2, skipped=2)",
+  "errors": 2,
+  "failures": 49,
+  "passed": 87,
   "result": "partial",
+  "skipped": 2,
   "total": 140
  }
 }
