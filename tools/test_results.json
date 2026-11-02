@@ -45,11 +45,11 @@
   "total": 67
  },
  "bisect": {
-  "detail": "FAILED (errors=23)",
-  "errors": 23,
+  "detail": "",
+  "errors": 0,
   "failures": 0,
-  "passed": 23,
-  "result": "partial",
+  "passed": 46,
+  "result": "pass",
   "skipped": 0,
   "total": 46
  },
@@ -117,13 +117,13 @@
   "total": 6
  },
  "csv": {
-  "detail": "ModuleNotFoundError: Standard library module '_csv' was not found",
+  "detail": "OK (skipped=4)",
   "errors": 0,
   "failures": 0,
-  "passed": 0,
-  "result": "fail",
-  "skipped": 0,
-  "total": 0
+  "passed": 136,
+  "result": "partial",
+  "skipped": 4,
+  "total": 140
  },
  "dataclasses": {
   "detail": "FAILED (failures=20, errors=37, skipped=1)",
@@ -264,13 +264,13 @@
   "result": "timeout"
  },
  "json": {
-  "detail": "AttributeError: 'NoneType' object has no attribute 'JSONDecodeError' and no __dict__ for setting new attributes",
+  "detail": "FAILED (failures=24, skipped=1)",
   "errors": 0,
-  "failures": 0,
-  "passed": 0,
-  "result": "fail",
-  "skipped": 0,
-  "total": 0
+  "failures": 24,
+  "passed": 212,
+  "result": "partial",
+  "skipped": 1,
+  "total": 237
  },
  "keyword": {
   "detail": "",
@@ -335,6 +335,15 @@
   "skipped": 2,
   "total": 116
  },
+ "re": {
+  "detail": "FAILED (failures=1, skipped=4)",
+  "errors": 0,
+  "failures": 1,
+  "passed": 163,
+  "result": "partial",
+  "skipped": 4,
+  "total": 168
+ },
  "reprlib": {
   "detail": "FAILED (errors=1, skipped=2)",
   "errors": 1,
@@ -394,11 +403,11 @@
   "total": 441
  },
  "types": {
-  "detail": "ModuleNotFoundError: Standard library module '_datetime' was not found",
+  "detail": "opcode GET_AWAITABLE is not implemented",
   "errors": 0,
   "failures": 0,
   "passed": 0,
-  "result": "fail",
+  "result": "blocked",
   "skipped": 0,
   "total": 0
  },

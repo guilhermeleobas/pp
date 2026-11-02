@@ -15,6 +15,8 @@ Branches below are pushed to GitHub.
   (`typeobject`, `abstract`, `call`, `ceval`, `genobject`, `funcobject`).
 - Milestone 3 regression fixes: per-type slot data in a VM-side weak table,
   CPython-style method cache, warnings through the guest `warnings` module.
+- Pure-Python `_sre` (explicit-stack matcher, `re` entirely in Python) and
+  accelerator stand-ins `_bisect`, `_datetime`, `_json`, `_csv`.
 - Host-boundary import guard test (`tests/test_host_boundary.py`).
 - Pure-Python `_collections` (deque, defaultdict, OrderedDict), `array`,
   `_weakref` and `gc` in `pp/lib` (weak refs never die; `gc.collect()` frees
@@ -24,32 +26,28 @@ Branches below are pushed to GitHub.
 - Design rule: C modules are reimplemented in Python, limitations accepted
   (DESIGN.md, "C modules: reimplement, don't borrow").
 
-## In review (not merged)
+## In progress
 
-| Branch | What | Review | Gate | Next step |
-|---|---|---|---|---|
-| `impl/sre` | Pure-Python `_sre` regex engine (`re` fully in Python) | merge, with a limit: `RecursionError` on group repeats over ~600 chars | clean vs `main` | rebase after `impl/m3-fixes` (conflicts); explicit-stack matcher on `impl/sre-stack` (9bf8304, test_re 160/168) |
-
-Merge order: `impl/sre-stack` (includes `impl/sre`), then `impl/accel` and
-`perf/eval-loop`; regenerate the dashboard after each.
+| Branch | What | Status |
+|---|---|---|
+| `perf/eval-loop` | Interpreter loop and slot dispatch speed (Opus) | in progress |
 
 ## Next
 
-1. **Finish the review queue above** (judge on Opus, then merge).
-2. **Performance** of the interpreter loop (Opus/Fable, `perf/` branch): the
-   milestone 3 ~2× slowdown, `difflib`/`itertools`/`datetime`/`statistics`
-   timeouts.
-3. **`_sre` explicit-stack matcher**, as in `sre_lib.h`, to remove the
-   recursion limit.
-4. **Async opcodes** (GET_AWAITABLE, GET_AITER, GET_ANEXT, END_ASYNC_FOR):
-   unblocks `unittest`, `collections`, `contextlib` and everything that imports
-   `asyncio` through `test.support`.
-5. **Remaining C modules → `pp/lib`** (one branch each): `math`, `_struct`,
+1. **Performance** of the interpreter loop (in progress, `perf/eval-loop`):
+   the milestone 3 ~2× slowdown and the `difflib`, `itertools`, `datetime`,
+   `statistics` timeouts.
+2. **Async opcodes** (GET_AWAITABLE, GET_AITER, GET_ANEXT, END_ASYNC_FOR):
+   unblocks `unittest`, `collections`, `contextlib`, `types` and everything
+   that imports `asyncio` through `test.support`.
+3. **Layout**: split `pp/` into `pp/vm/` (host code) and `pp/lib/` (guest
+   code) once in-flight branches have merged.
+4. **Remaining C modules → `pp/lib`** (one branch each): `math`, `_struct`,
    `_string`, `_contextvars`, `_random`, `binascii`, `zlib`, `unicodedata`,
    `_locale`, `_typing`, `_codecs`, plus accelerator stand-ins `_csv`, `_json`,
    `_bisect`, `_pickle`, `_datetime`, `_hashlib`. Then a pp-native t-string
    `Template`/`Interpolation`.
-6. The ranked to-do list in [BLOCKERS.md](BLOCKERS.md#to-do) (doctest
+5. The ranked to-do list in [BLOCKERS.md](BLOCKERS.md#to-do) (doctest
    `displayhook`, PEP 695 TypeVars, `FunctionType(closure=)`, `__index__`,
    mock context managers, guest-only tracebacks, recursion accounting, `dis`
    parity).
@@ -62,7 +60,8 @@ pp-owned object model (needed for real weak references and `gc`).
 What pp does not yet provide in pure Python, against Python 3.15's
 `sys.stdlib_module_names`. The importer is in `pp/importer.py`; pure-Python
 replacements live in `pp/lib/`. Already reimplemented: `_collections`,
-`array`, `_weakref`, `gc`, `itertools`.
+`array`, `_weakref`, `gc`, `itertools`, `_sre`, `_bisect`, `_datetime`,
+`_json`, `_csv`.
 
 ### C modules still borrowed from the host (to reimplement)
 
@@ -70,7 +69,6 @@ replacements live in `pp/lib/`. Already reimplemented: `_collections`,
 
 | Module | Used by | Status |
 |---|---|---|
-| `_sre` | `re` and everything using regexes | in review (`impl/sre-stack`) |
 | `math` | `fractions`, `statistics`, `random`, `decimal`, ... | |
 | `_struct` | `struct`, `pickle`, `zipfile`, `base64`, ... | |
 | `_string` | `string.Formatter` | |
@@ -93,7 +91,6 @@ pure Python), plus `sys` and `builtins`, which the VM serves itself.
 
 | Area | Modules | Blocks |
 |---|---|---|
-| Accelerators imported directly by tests | `_bisect`, `_json`, `_csv`, `_datetime` | `bisect`, `json`, `csv`, `types` tests (in progress: `impl/accel`) |
 | Hashing | `_hashlib`, `_md5`, `_sha1`, `_sha2`, `_sha3`, `_blake2`, `_hmac` | `hashlib`, `hmac`, `secrets`, `random` seeding by bytes |
 | Compression | `_bz2`, `_lzma`, `_zstd` (and borrowed `zlib`) | `bz2`, `lzma`, `compression.zstd`, `tarfile`, `zipfile` |
 | XML | `pyexpat`, `_elementtree` (Python fallback exists) | `xml.parsers.expat`, `xml.dom.minidom`, `plistlib` |
@@ -117,12 +114,12 @@ Accelerators that pp blocks on purpose, so the pure-Python fallback runs
 Tracked today: 51 modules (see [STATUS.md](STATUS.md)). Untracked public
 modules, roughly in the order they are worth adding:
 
-- **Core**: `re`, `io`, `os`, `pathlib`, `struct`, `pickle`, `codecs`,
+- **Core**: `io`, `os`, `pathlib`, `struct`, `pickle`, `codecs`,
   `numbers`, `contextvars`, `importlib`, `linecache`, `tokenize`, `token`,
   `opcode`, `stat`, `genericpath`, `annotationlib`, `logging`, `doctest`,
   `timeit`, `locale`, `gettext`, `signal`, `threading`, `asyncio`.
 - **Text and data**: `email`, `mimetypes`, `quopri`, `stringprep`,
-  `pickletools`, `plistlib`, `xml`, `csv` (tracked; blocked on `_csv`),
+  `pickletools`, `plistlib`, `xml`,
   `uuid`, `zoneinfo`, `secrets`, `hashlib`, `hmac`.
 - **Files and archives**: `shutil`, `tempfile`, `filecmp`, `fileinput`,
   `glob` (tracked), `zipfile`, `tarfile`, `gzip`, `bz2`, `lzma`,

@@ -6,23 +6,23 @@ A module counts as **pass** when its CPython test file runs to completion under 
 (`python -m pp run tools/run_unittest.py test.test_<module>`). The test file and every pure-Python module it
 imports run in the VM; C modules come from the host only if listed in `pp/importer.py`.
 
-Host C modules still borrowed: 16 temporary (to replace with Python), 16 permanent (host boundary).
+Host C modules still borrowed: 15 temporary (to replace with Python), 16 permanent (host boundary).
 
-Temporary: `_contextvars`, `_locale`, `_posixsubprocess`, `_random`, `_socket`, `_sre`, `_string`, `_struct`, `binascii`, `faulthandler`, `fcntl`, `math`, `resource`, `select`, `unicodedata`, `zlib`
+Temporary: `_contextvars`, `_locale`, `_posixsubprocess`, `_random`, `_socket`, `_string`, `_struct`, `binascii`, `faulthandler`, `fcntl`, `math`, `resource`, `select`, `unicodedata`, `zlib`
 
 ## Summary
 
 | Result | Modules |
 |---|---|
-| partial | 26 |
-| pass | 12 |
-| fail | 6 |
+| partial | 28 |
+| pass | 13 |
+| blocked | 4 |
 | timeout | 4 |
-| blocked | 3 |
+| fail | 3 |
 
 | Kind | Modules | What pp needs |
 |---|---|---|
-| Python | 30 | run the `.py` source through the VM |
+| Python | 31 | run the `.py` source through the VM |
 | Python + C helper | 18 | use its Python fallback if it has one, else reimplement the `_<name>` C helper |
 | C only | 3 | reimplement in Python under `pp/lib/` |
 
@@ -30,7 +30,7 @@ Temporary: `_contextvars`, `_locale`, `_posixsubprocess`, `_random`, `_socket`, 
 
 | Missing | Modules blocked |
 |---|---|
-| `opcode GET_AWAITABLE is not implemented` | 3 |
+| `opcode GET_AWAITABLE is not implemented` | 4 |
 
 ## Modules
 
@@ -38,7 +38,7 @@ Temporary: `_contextvars`, `_locale`, `_posixsubprocess`, `_random`, `_socket`, 
 |---|---|---|---|---|---|---|---|
 | 1 | operator | Python + C helper | test/test_operator.py | partial | `████░░░░░░` 43% 49/112 |  | FAILED (failures=1, errors=3, skipped=59) |
 | 1 | keyword | Python | test/test_keyword.py | pass | `██████████` 100% 11/11 |  |  |
-| 1 | types | Python + C helper | test/test_types.py | fail | — |  | ModuleNotFoundError: Standard library module '_datetime' was not found |
+| 1 | types | Python + C helper | test/test_types.py | blocked | — |  | opcode GET_AWAITABLE is not implemented |
 | 1 | functools | Python + C helper | test/test_functools.py | partial | `██████░░░░` 59% 200/338 |  | FAILED (failures=9, errors=4, skipped=125) |
 | 1 | collections | Python + C helper | test/test_collections.py | blocked | — |  | opcode GET_AWAITABLE is not implemented |
 | 1 | heapq | Python + C helper | test/test_heapq.py | partial | `█████░░░░░` 47% 33/69 |  | FAILED (failures=2, skipped=34) |
@@ -53,17 +53,18 @@ Temporary: `_contextvars`, `_locale`, `_posixsubprocess`, `_random`, `_socket`, 
 | 2 | string | Python + C helper | test/test_string | partial | `░░░░░░░░░░` 1% 1/55 |  | FAILED (errors=54) |
 | 2 | textwrap | Python | test/test_textwrap.py | pass | `██████████` 100% 68/68 |  |  |
 | 2 | fnmatch | Python | test/test_fnmatch.py | pass | `██████████` 100% 24/24 |  |  |
+| 2 | re | Python | test/test_re.py | partial | `██████████` 97% 163/168 |  | FAILED (failures=1, skipped=4) |
 | 3 | traceback | Python | test/test_traceback.py | partial | `███░░░░░░░` 26% 116/441 |  | FAILED (failures=43, errors=149, skipped=133) |
 | 3 | difflib | Python | test/test_difflib.py | timeout | — |  | >600s |
 | 3 | pprint | Python | test/test_pprint.py | pass | `██████████` 100% 77/77 |  |  |
 | 3 | argparse | Python | test/test_argparse.py | partial | `██████████` 99% 1960/1963 |  | FAILED (errors=2, skipped=1) |
 | 3 | unittest | Python | test/test_unittest | blocked | — |  | opcode GET_AWAITABLE is not implemented |
-| 4 | bisect | Python + C helper | test/test_bisect.py | partial | `█████░░░░░` 50% 23/46 |  | FAILED (errors=23) |
+| 4 | bisect | Python + C helper | test/test_bisect.py | pass | `██████████` 100% 46/46 |  |  |
 | 4 | colorsys | Python | test/test_colorsys.py | pass | `██████████` 100% 8/8 |  |  |
 | 4 | copy | Python | test/test_copy.py | partial | `█████████░` 94% 79/84 |  | FAILED (failures=4, errors=1) |
 | 4 | dataclasses | Python | test/test_dataclasses | partial | `████████░░` 79% 227/285 |  | FAILED (failures=20, errors=37, skipped=1) |
 | 4 | graphlib | Python | test/test_graphlib.py | pass | `██████████` 100% 17/17 |  |  |
-| 4 | json | Python | test/test_json | fail | — |  | AttributeError: 'NoneType' object has no attribute 'JSONDecodeError' and no __dict__ for setting new attributes |
+| 4 | json | Python | test/test_json | partial | `█████████░` 89% 212/237 |  | FAILED (failures=24, skipped=1) |
 | 4 | fractions | Python | test/test_fractions.py | pass | `██████████` 100% 50/50 |  |  |
 | 4 | statistics | Python + C helper | test/test_statistics.py | timeout | — |  | >600s |
 | 4 | shlex | Python | test/test_shlex.py | pass | `██████████` 100% 45/45 |  |  |
@@ -72,7 +73,7 @@ Temporary: `_contextvars`, `_locale`, `_posixsubprocess`, `_random`, `_socket`, 
 | 4 | tomllib | Python | test/test_tomllib | partial | `████████░░` 83% 15/18 |  | FAILED (errors=3) |
 | 4 | base64 | Python | test/test_base64.py | pass | `██████████` 100% 67/67 |  |  |
 | 4 | html | Python | test/test_html.py | pass | `██████████` 100% 2/2 |  |  |
-| 4 | csv | Python + C helper | test/test_csv.py | fail | — |  | ModuleNotFoundError: Standard library module '_csv' was not found |
+| 4 | csv | Python + C helper | test/test_csv.py | partial | `██████████` 97% 136/140 |  | OK (skipped=4) |
 | 4 | ipaddress | Python | test/test_ipaddress.py | partial | `██████████` 97% 206/212 |  | FAILED (errors=6) |
 | 4 | random | Python + C helper | test/test_random.py | partial | `█████████░` 86% 100/116 |  | FAILED (errors=14, skipped=2) |
 | 4 | typing | Python + C helper | test/test_typing.py | fail | — |  | TypeError: Parameters to Generic[...] must all be type variables or parameter specification variables. |
