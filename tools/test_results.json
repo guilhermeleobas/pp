@@ -12,9 +12,9 @@
   "total": 1963
  },
  "collections": {
-  "detail": "E",
+  "detail": "opcode GET_AWAITABLE is not implemented",
   "passed": 0,
-  "result": "fail",
+  "result": "blocked",
   "total": 0
  },
  "contextlib": {
@@ -24,10 +24,10 @@
   "total": 0
  },
  "copyreg": {
-  "detail": "ModuleNotFoundError: Standard library module 'resource' was not found",
-  "passed": 0,
-  "result": "fail",
-  "total": 0
+  "detail": "",
+  "passed": 6,
+  "result": "pass",
+  "total": 6
  },
  "difflib": {
   "detail": "FAILED (failures=25)",
@@ -36,8 +36,8 @@
   "total": 61
  },
  "enum": {
-  "detail": "FAILED (failures=9, errors=5, skipped=4)",
-  "passed": 1069,
+  "detail": "FAILED (failures=10, errors=5, skipped=4)",
+  "passed": 1068,
   "result": "partial",
   "total": 1087
  },
@@ -48,10 +48,10 @@
   "total": 24
  },
  "functools": {
-  "detail": "ModuleNotFoundError: Standard library module 'resource' was not found",
-  "passed": 0,
-  "result": "fail",
-  "total": 0
+  "detail": "FAILED (failures=7, errors=4, skipped=125)",
+  "passed": 202,
+  "result": "partial",
+  "total": 338
  },
  "heapq": {
   "detail": "FAILED (failures=2, skipped=34)",
@@ -70,8 +70,8 @@
   "total": 11
  },
  "operator": {
-  "detail": "FAILED (errors=10, skipped=59)",
-  "passed": 43,
+  "detail": "FAILED (errors=3, skipped=59)",
+  "passed": 50,
   "result": "partial",
   "total": 112
  },
@@ -112,20 +112,20 @@
   "total": 0
  },
  "unittest": {
-  "detail": "RuntimeError: Cannot close a running event loop",
+  "detail": "opcode GET_AWAITABLE is not implemented",
   "passed": 0,
-  "result": "fail",
+  "result": "blocked",
   "total": 0
  },
  "warnings": {
-  "detail": "ModuleNotFoundError: No module named 'test.test_warnings.data'. Did you mean: 'test.test_warnings.__init__'?",
-  "passed": 0,
-  "result": "fail",
-  "total": 0
+  "detail": "FAILED (failures=64, errors=15, skipped=6)",
+  "passed": 120,
+  "result": "partial",
+  "total": 205
  },
  "weakref": {
-  "detail": "FAILED (failures=8, errors=1, skipped=2)",
-  "passed": 129,
+  "detail": "FAILED (failures=10, skipped=2)",
+  "passed": 128,
   "result": "partial",
   "total": 140
  }
