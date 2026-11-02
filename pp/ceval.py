@@ -5,8 +5,11 @@ import sys
 import types
 
 import opcode as _opcode
+import operator as _operator
 
 from pp import call as _call
+from pp import errors as _errors
+from pp import typeobject as _typeobject
 from pp import object as _obj
 from pp.abstract import (PYGEN_RETURN, PyIter_Next, PyIter_Send, PyNumber_Add, PyNumber_And, PyNumber_FloorDivide,
                          PyNumber_InPlaceAdd, PyNumber_InPlaceAnd, PyNumber_InPlaceFloorDivide,
@@ -35,6 +38,17 @@ from pp.errors import (PyErr_GivenExceptionMatches, PyExceptionClass_Check, PyTh
 from pp.frame import NULL, Frame  # noqa: F401  (NULL is part of the pp.vm API)
 from pp.funcobject import Function, PyFunction_New, bind_arguments, builtins_from_globals
 from pp.genobject import PyAsyncGenObject, PyCoroObject, PyGenObject
+
+_GenericGetAttr = _obj.PyObject_GenericGetAttr
+_BuiltinFunction = types.BuiltinFunctionType
+_MethodType = types.MethodType
+_views_get = _typeobject._views_get
+
+_next = next
+_FAST_ITERATORS = frozenset((type(iter([])), type(iter(())), type(iter(range(1))), type(iter("")),
+                             type(iter({})), type(iter({}.values())), type(iter({}.items())),
+                             type(iter(set())), type(iter(b"")), enumerate, zip, reversed,
+                             type(reversed([])), map, filter, type(iter(range(1 << 70)))))
 
 _EXIT = object()  # returned by a handler to leave the eval loop
 
@@ -84,6 +98,33 @@ _NB_FUNCS = {
     "NB_SUBSCR": PyObject_GetItem,
 }
 BINARY_OPS = tuple(_NB_FUNCS[name] for name, _ in _opcode._nb_ops)
+
+# Specialized BINARY_OP / COMPARE_OP / TO_BOOL (BINARY_OP_ADD_INT, COMPARE_OP_INT,
+# TO_BOOL_LIST, ...): for exact builtin operand types the slot functions are the
+# C implementations of the very same operations, so call them directly.
+_OPERATOR_FOR_NB = {
+    "NB_ADD": _operator.add, "NB_AND": _operator.and_, "NB_FLOOR_DIVIDE": _operator.floordiv,
+    "NB_LSHIFT": _operator.lshift, "NB_MULTIPLY": _operator.mul,
+    "NB_REMAINDER": _operator.mod, "NB_OR": _operator.or_, "NB_POWER": _operator.pow,
+    "NB_RSHIFT": _operator.rshift, "NB_SUBTRACT": _operator.sub,
+    "NB_TRUE_DIVIDE": _operator.truediv, "NB_XOR": _operator.xor,
+    "NB_INPLACE_ADD": _operator.add, "NB_INPLACE_AND": _operator.and_,
+    "NB_INPLACE_FLOOR_DIVIDE": _operator.floordiv, "NB_INPLACE_LSHIFT": _operator.lshift,
+    "NB_INPLACE_MULTIPLY": _operator.mul, "NB_INPLACE_REMAINDER": _operator.mod,
+    "NB_INPLACE_OR": _operator.or_, "NB_INPLACE_POWER": _operator.pow,
+    "NB_INPLACE_RSHIFT": _operator.rshift, "NB_INPLACE_SUBTRACT": _operator.sub,
+    "NB_INPLACE_TRUE_DIVIDE": _operator.truediv, "NB_INPLACE_XOR": _operator.xor,
+}
+_NUMBER_BINOPS = tuple(_OPERATOR_FOR_NB.get(name) for name, _ in _opcode._nb_ops)
+_ADD_ONLY = tuple(_operator.add if name == "NB_ADD" else None
+                  for name, _ in _opcode._nb_ops)
+_ADD_IMMUTABLE = tuple(_operator.add if name in ("NB_ADD", "NB_INPLACE_ADD") else None
+                       for name, _ in _opcode._nb_ops)    # str, tuple: += is +
+_NUMBER_TYPES = frozenset((int, float))
+_COMPARE_FUNCS = (_operator.lt, _operator.le, _operator.eq, _operator.ne, _operator.gt,
+                  _operator.ge)
+_COMPARE_TYPES = frozenset((int, float, str))
+_TRUTH_TYPES = frozenset((int, float, str, bytes, list, tuple, dict, set, frozenset))
 
 # CONVERT_VALUE: FVC_STR=1, FVC_REPR=2, FVC_ASCII=3
 CONVERSIONS = (None, str, repr, ascii)
@@ -414,6 +455,7 @@ class VirtualMachine:
         self.frame: Frame | None = None
         self.tstate = PyThreadState()
         self.tstate.eval_frame = self.run_frame
+        self.tstate.vm = self
         self.path: list = list(path or [])
         self.modules: dict = {}
         self.builtins_module = make_builtins(self)
@@ -485,7 +527,12 @@ class VirtualMachine:
         code = func.__code__
         locals = None if code.co_flags & CO_OPTIMIZED else func.__globals__
         frame = Frame(code, func.__globals__, func.__builtins__, locals, func=func)
-        bind_arguments(func, frame.localsplus, frame.localsplusnames, args, kwargs)
+        nargs = len(args)
+        if (nargs == code.co_argcount and not kwargs and not code.co_flags & 0xC
+                and not code.co_kwonlyargcount):
+            frame.localsplus[:nargs] = args          # the plain positional case
+        else:
+            bind_arguments(func, frame.localsplus, frame.localsplusnames, args, kwargs)
         return self.run_frame(frame)
 
     def call(self, callable, args, kwargs=None):
@@ -494,7 +541,9 @@ class VirtualMachine:
     def run_frame(self, frame: Frame, throw: BaseException | None = None) -> object:
         """Execute `frame` until it returns or yields; `throw` resumes it with an exception."""
         tstate = self.tstate
-        prev_tstate = _PyThreadState_Swap(tstate)
+        prev_tstate = _errors._current_tstate
+        if prev_tstate is not tstate:
+            _PyThreadState_Swap(tstate)
         frame.previous = self.frame
         self.frame = frame
         decoded = frame.decoded
@@ -540,7 +589,8 @@ class VirtualMachine:
                 exc = None
         finally:
             self.frame = frame.previous
-            _PyThreadState_Swap(prev_tstate)
+            if prev_tstate is not tstate:
+                _PyThreadState_Swap(prev_tstate)
 
     # --- no-ops ---
 
@@ -607,7 +657,13 @@ class VirtualMachine:
         return v
 
     def LOAD_GLOBAL(self, f, i):
-        f.stack.append(self._load_global(f, f.code.co_names[i.arg >> 1]))
+        name = f.code.co_names[i.arg >> 1]
+        v = _dict_get(f.globals, name, _MISSING)
+        if v is _MISSING:
+            v = _dict_get(f.builtins, name, _MISSING)
+            if v is _MISSING:
+                raise _name_error(name)
+        f.stack.append(v)
         if i.arg & 1:
             f.stack.append(NULL)
 
@@ -775,12 +831,34 @@ class VirtualMachine:
         f.stack.append(func)
 
     def _call(self, f, nargs, kwnames):
-        args = f.popn(nargs)
-        self_or_null = f.stack.pop()
-        callable = f.stack.pop()
+        stack = f.stack
+        if nargs:
+            args = stack[-nargs:]
+            del stack[-nargs:]
+        else:
+            args = []
+        self_or_null = stack.pop()
+        callable = stack.pop()
         if self_or_null is not NULL:
             args.insert(0, self_or_null)
-        f.stack.append(_call.PyObject_Vectorcall(callable, args, kwnames))
+        if not kwnames:
+            tc = type(callable)
+            if tc is Function:
+                # _PyFunction_Vectorcall
+                stack.append(callable._vm.call_function(callable, args, None))
+                return
+            if tc is _MethodType:
+                # _PyObject_Vectorcall of a bound method: prepend self
+                func = callable.__func__
+                if type(func) is Function:
+                    args.insert(0, callable.__self__)
+                    stack.append(func._vm.call_function(func, args, None))
+                    return
+            elif tc is _BuiltinFunction and len(args) != 4:
+                # CALL_BUILTIN_FAST: cfunction_call minus the type.__new__ special case
+                stack.append(callable(*args))
+                return
+        stack.append(_call.PyObject_Vectorcall(callable, args, kwnames))
 
     def CALL(self, f, i):
         self._call(f, i.arg, ())
@@ -983,9 +1061,22 @@ class VirtualMachine:
     # --- operators ---
 
     def BINARY_OP(self, f, i):
-        rhs = f.stack.pop()
-        lhs = f.stack.pop()
-        f.stack.append(BINARY_OPS[i.arg](lhs, rhs))
+        stack = f.stack
+        rhs = stack.pop()
+        lhs = stack.pop()
+        tl = type(lhs)
+        tr = type(rhs)
+        if tl in _NUMBER_TYPES and tr in _NUMBER_TYPES:
+            fn = _NUMBER_BINOPS[i.arg]
+            if fn is not None:
+                stack.append(fn(lhs, rhs))
+                return
+        elif tl is tr and (tl is str or tl is list or tl is tuple):
+            fn = (_ADD_ONLY if tl is list else _ADD_IMMUTABLE)[i.arg]
+            if fn is not None:
+                stack.append(fn(lhs, rhs))
+                return
+        stack.append(BINARY_OPS[i.arg](lhs, rhs))
 
     def BINARY_SLICE(self, f, i):
         stop = f.stack.pop()
@@ -1021,15 +1112,30 @@ class VirtualMachine:
         f.stack.append(f.stack.pop() is False)  # TO_BOOL always precedes
 
     def TO_BOOL(self, f, i):
-        f.stack.append(PyObject_IsTrue(f.stack.pop()))
+        stack = f.stack
+        v = stack.pop()
+        if v is True or v is False:
+            stack.append(v)
+        elif v is None:
+            stack.append(False)
+        elif type(v) in _TRUTH_TYPES:
+            stack.append(bool(v))
+        else:
+            stack.append(PyObject_IsTrue(v))
 
     def COMPARE_OP(self, f, i):
-        right = f.stack.pop()
-        left = f.stack.pop()
+        stack = f.stack
+        right = stack.pop()
+        left = stack.pop()
+        tl = type(left)
+        tr = type(right)
+        if tl in _COMPARE_TYPES and (tl is tr or (tl is not str and tr is not str and tr in _COMPARE_TYPES)):
+            stack.append(_COMPARE_FUNCS[i.arg >> 5](left, right))
+            return
         res = PyObject_RichCompare(left, right, i.arg >> 5)
         if i.arg & 16:
             res = PyObject_IsTrue(res)
-        f.stack.append(res)
+        stack.append(res)
 
     def IS_OP(self, f, i):
         right = f.stack.pop()
@@ -1078,10 +1184,16 @@ class VirtualMachine:
         it = f.stack[-2]
         stop = False
         v = NULL
-        try:
-            v = Py_TYPE(it).tp_iternext(it)
-        except StopIteration:
-            stop = True
+        if type(it) in _FAST_ITERATORS:
+            # FOR_ITER_LIST / _TUPLE / _RANGE & co: the C tp_iternext of an exact
+            # builtin iterator, without the exception for the exhausted case.
+            v = _next(it, _MISSING)
+            stop = v is _MISSING
+        else:
+            try:
+                v = Py_TYPE(it).tp_iternext(it)
+            except StopIteration:
+                stop = True
         if stop:
             # Exhausted: jump past the END_FOR at the target, leaving iter/null for POP_ITER.
             _PyErr_Clear(self.tstate)
@@ -1204,7 +1316,13 @@ class VirtualMachine:
             f.stack.append(attr)
             f.stack.append(owner if meth_found else NULL)
         else:
-            f.stack.append(PyObject_GetAttr(owner, name))
+            view = _views_get(id(type(owner))) or Py_TYPE(owner)
+            if view.tp_getattro is _GenericGetAttr:
+                # PyObject_GetAttr -> tp_getattro, minus the error-context wrapper
+                # (the generic getattr sets name/obj itself).
+                f.stack.append(_GenericGetAttr(owner, name))
+            else:
+                f.stack.append(PyObject_GetAttr(owner, name))
 
     def STORE_ATTR(self, f, i):
         owner = f.stack.pop()
@@ -1234,8 +1352,8 @@ class VirtualMachine:
         if global_super is super_type and PyType_Check(cls):
             # The specialized LOAD_SUPER_ATTR_ATTR / _METHOD: _PySuper_Lookup.
             attr, method = _PySuper_Lookup(
-        cls, self_, name, super_type,
-        (i.arg & 1) and Py_TYPE(self_).tp_getattro is _obj.PyObject_GenericGetAttr)
+                cls, self_, name, super_type,
+                (i.arg & 1) and Py_TYPE(self_).tp_getattro is _obj.PyObject_GenericGetAttr)
         else:
             sup = _call.PyObject_Vectorcall(global_super, (cls, self_) if i.arg & 2 else ())
             attr = PyObject_GetAttr(sup, name)

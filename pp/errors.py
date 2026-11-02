@@ -56,6 +56,7 @@ class PyThreadState:
         self.exc_info = self.exc_state        # tstate->exc_info: top of the chain
         self.current_exception = None         # tstate->current_exception
         self.eval_frame = None                # _PyEval_EvalFrame: set by the interpreter
+        self.vm = None                        # the interpreter running on this thread state
 
 
 _current_tstate = None
@@ -148,3 +149,24 @@ def PyErr_GivenExceptionMatches(err, exc) -> bool:
     if PyExceptionClass_Check(err) and PyExceptionClass_Check(exc):
         return PyType_IsSubtype(PyType_View(err), PyType_View(exc))
     return err is exc
+
+
+def PyErr_WarnEx(category, message, stack_level) -> None:
+    """Issue a warning attributed to the `stack_level`-th VM frame (1 is the
+    running one), through the host's `_warnings` (shared with the VM's `warnings`)."""
+    import _warnings
+    tstate = _PyThreadState_GET()
+    frame = tstate.vm.frame if tstate is not None and tstate.vm is not None else None
+    for _ in range(stack_level - 1):
+        if frame is not None and frame.previous is not None:
+            frame = frame.previous
+    if frame is None:
+        _warnings.warn_explicit(message, category, "sys", 1)
+        return
+    globals_ = frame.globals
+    registry = globals_.get("__warningregistry__")
+    if registry is None:
+        registry = globals_["__warningregistry__"] = {}
+    module = globals_.get("__name__", "<string>")
+    _warnings.warn_explicit(message, category, frame.code.co_filename, frame.lineno() or 1,
+                            module, registry, globals_)

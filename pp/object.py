@@ -11,7 +11,10 @@ the optional/suppressing variants is the `NULL` sentinel.
 from pp.errors import _PyErr_Clear, _PyThreadState_GET
 from pp.frame import NULL
 from pp.typeobject import (Py_TPFLAGS_METHOD_DESCRIPTOR, Py_TYPE, PyObject_TypeCheck,
-                           PyType_Check, PyType_IsSubtype, PyType_View, _PyType_Lookup,
+                           PyType_Check, PyType_IsSubtype, PyType_View, _PyObject_GetDictPtr,
+                           _PyType_Lookup, _PyObject_GenericGetDict, DICT_NONE, DICT_STD,
+                           _ReferenceType, _tp_dict, _type_dictget, _views_get, _object_getattribute,
+                           _new_view,
                            register_wrapper_slot, update_slot)
 
 Py_LT, Py_LE, Py_EQ, Py_NE, Py_GT, Py_GE = range(6)
@@ -112,10 +115,7 @@ def PyObject_SetAttr(v, name, value) -> None:
 
 def _PyObject_GetDict(obj, tp):
     """The instance dict (`_PyObject_GetDictPtr`), or None if the type has none."""
-    descr = tp.tp_dictdescr
-    if descr is NULL:
-        return None
-    return descr.__get__(obj)
+    return _PyObject_GetDictPtr(obj, tp)
 
 
 def _PyObject_GenericGetAttrWithDict(obj, name, dict_, suppress):
@@ -149,11 +149,11 @@ def _PyObject_GenericGetAttrWithDict(obj, name, dict_, suppress):
 
 def _call_descr_get(f, descr, obj, tp, suppress):
     if not suppress:
-        return f(descr, obj, tp.type)
+        return f(descr, obj, type(obj))
     err = None
     res = NULL
     try:
-        res = f(descr, obj, tp.type)
+        res = f(descr, obj, type(obj))
     except AttributeError as e:
         err = e
     if err is not None:
@@ -163,7 +163,42 @@ def _call_descr_get(f, descr, obj, tp, suppress):
 
 
 def PyObject_GenericGetAttr(obj, name):
-    return _PyObject_GenericGetAttrWithDict(obj, name, NULL, False)
+    # _PyObject_GenericGetAttrWithDict(obj, name, NULL, 0), flattened: this is the
+    # one function every attribute load of an ordinary object goes through.
+    tp = _views_get(id(type(obj))) or Py_TYPE(obj)
+    if type(name) is not str and not PyUnicode_Check(name):
+        raise _name_error(name)
+
+    descr = NULL
+    for entry in tp.tp_chain:                    # _PyType_Lookup(tp, name)
+        if type(entry) is _ReferenceType:
+            entry = _tp_dict(entry())
+        descr = _type_dictget(entry, name, NULL)
+        if descr is not NULL:
+            break
+    f = None
+    if descr is not NULL:
+        descr_type = _views_get(id(type(descr))) or Py_TYPE(descr)
+        f = descr_type.tp_descr_get
+        if f is not None and descr_type.tp_descr_set is not None:
+            return f(descr, obj, type(obj))
+    kind = tp.tp_dictkind                        # _PyObject_GetDictPtr
+    if kind == DICT_STD:
+        dict_ = _object_getattribute(obj, "__dict__")
+    elif kind == DICT_NONE:
+        dict_ = None
+    else:
+        dict_ = _PyObject_GenericGetDict(obj)
+    if dict_ is not None:
+        res = _dict_get(dict_, name, NULL)
+        if res is not NULL:
+            return res
+    if f is not None:
+        return f(descr, obj, type(obj))
+    if descr is not NULL:
+        return descr
+    raise AttributeError(f"'{tp.tp_name}' object has no attribute '{name}'",
+                         name=name, obj=obj)
 
 
 def _PyObject_GenericSetAttrWithDict(obj, name, value, dict_):
@@ -203,22 +238,34 @@ def PyObject_GenericSetAttr(obj, name, value):
 def _PyObject_GetMethod(obj, name):
     """-> (value, meth_found). With meth_found true, `value` is an unbound method
     to call with `obj` as the first argument."""
-    tp = Py_TYPE(obj)
+    tp = _views_get(id(type(obj))) or Py_TYPE(obj)
     if tp.tp_getattro is not PyObject_GenericGetAttr or type(name) is not str:
         return PyObject_GetAttr(obj, name), False
 
-    descr = _PyType_Lookup(tp, name)
+    descr = NULL
+    for entry in tp.tp_chain:                    # _PyType_Lookup(tp, name)
+        if type(entry) is _ReferenceType:
+            entry = _tp_dict(entry())
+        descr = _type_dictget(entry, name, NULL)
+        if descr is not NULL:
+            break
     f = None
     meth_found = False
     if descr is not NULL:
-        descr_type = Py_TYPE(descr)
+        descr_type = _views_get(id(type(descr))) or Py_TYPE(descr)
         if descr_type.tp_flags & Py_TPFLAGS_METHOD_DESCRIPTOR:
             meth_found = True
         else:
             f = descr_type.tp_descr_get
             if f is not None and descr_type.tp_descr_set is not None:
-                return f(descr, obj, tp.type), False
-    dict_ = _PyObject_GetDict(obj, tp)
+                return f(descr, obj, type(obj)), False
+    kind = tp.tp_dictkind                        # _PyObject_GetDictPtr
+    if kind == DICT_STD:
+        dict_ = _object_getattribute(obj, "__dict__")
+    elif kind == DICT_NONE:
+        dict_ = None
+    else:
+        dict_ = _PyObject_GenericGetDict(obj)
     if dict_ is not None:
         attr = _dict_get(dict_, name, NULL)
         if attr is not NULL:
@@ -226,7 +273,7 @@ def _PyObject_GetMethod(obj, name):
     if meth_found:
         return descr, True
     if f is not None:
-        return f(descr, obj, tp.type), False
+        return f(descr, obj, type(obj)), False
     if descr is not NULL:
         return descr, False
     raise AttributeError(f"'{tp.tp_name}' object has no attribute '{name}'",
@@ -245,7 +292,7 @@ def _PyObject_LookupSpecialMethod(name, owner):
         return method, owner        # avoid a temporary bound method
     f = mt.tp_descr_get
     if f is not None:
-        return f(method, owner, tp.type), NULL
+        return f(method, owner, type(owner)), NULL
     return method, NULL
 
 
@@ -336,7 +383,7 @@ def _PyObject_LookupSpecial(self, name):
     if res is not NULL:
         f = Py_TYPE(res).tp_descr_get
         if f is not None:
-            res = f(res, self, tp.type)
+            res = f(res, self, type(self))
     return res
 
 

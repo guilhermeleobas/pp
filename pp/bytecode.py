@@ -19,7 +19,7 @@ def compile_source(source: str, filename: str = "<string>", mode: str = "exec") 
     return compile(source, filename, mode, dont_inherit=True)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Instruction:
     offset: int
     opcode: int
@@ -30,7 +30,7 @@ class Instruction:
     jump_target: int | None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ExceptionTableEntry:
     start: int
     end: int
