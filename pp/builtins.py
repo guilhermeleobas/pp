@@ -8,6 +8,7 @@ from pp.bytecode import compile_source
 from pp.frame import NULL
 from pp.funcobject import Function
 from pp.object import PyObject_SetAttr
+from pp.typeobject import PyType_View
 
 _host_super = _host_builtins.super
 _MISSING = object()
@@ -88,6 +89,8 @@ def make_builtins(vm) -> types.ModuleType:
         if bases is not orig_bases:
             namespace["__orig_bases__"] = orig_bases
         cls = vm.call(meta, (name, bases, namespace), kwds)
+        if isinstance(cls, type):
+            PyType_View(cls)
         if isinstance(cls, type) and isinstance(cell, types.CellType):
             try:
                 cell_cls = cell.cell_contents

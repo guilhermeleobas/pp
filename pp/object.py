@@ -13,7 +13,7 @@ from pp.frame import NULL
 from pp.typeobject import (Py_TPFLAGS_METHOD_DESCRIPTOR, Py_TYPE, PyObject_TypeCheck,
                            PyType_Check, PyType_IsSubtype, PyType_View, _PyObject_GetDictPtr,
                            _PyType_Lookup, _PyObject_GenericGetDict, DICT_NONE, DICT_STD,
-                           _ReferenceType, _tp_dict, _type_dictget, _views_get, _object_getattribute,
+                           _tp_dict, _type_dictget, _views_get, _object_getattribute,
                            _new_view, _UNSET,
                            register_wrapper_slot, update_slot)
 

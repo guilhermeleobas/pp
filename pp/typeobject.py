@@ -18,9 +18,7 @@ Calling convention: C returns NULL with an exception set; here the slot
 functions raise. "Missing" is the `NULL` sentinel.
 """
 
-import gc
 import types
-import weakref
 
 from pp.errors import _PyErr_Clear, _PyThreadState_GET
 from pp.frame import NULL
@@ -148,7 +146,6 @@ _AMBIGUOUS_DUNDERS = frozenset(d for d, fields in _DUNDER_FIELDS.items() if len(
 _AMBIGUOUS_FIELDS = frozenset(f for d in _AMBIGUOUS_DUNDERS for f in _DUNDER_FIELDS[d])
 del _f, _d, _g, _t
 
-_ReferenceType = weakref.ReferenceType
 _TYPE_ID = id(type)
 
 DICT_NONE, DICT_STD, DICT_SPECIAL = 0, 1, 2
@@ -157,62 +154,45 @@ DICT_NONE, DICT_STD, DICT_SPECIAL = 0, 1, 2
 class PyTypeObject:
     """The slot table of one host type.
 
-    The table must not keep its type alive (CPython's slots live in the type
-    itself): it refers to the type through a weak reference, and to the dicts
-    of heap types in its MRO through weak references too."""
-    __slots__ = ("_tpref", "tp_id", "tp_name", "tp_flags", "tp_mro_ids", "tp_chain",
+    CPython's slots live in the type object; a host type cannot be extended, so the
+    table of a heap type is kept in the type's own `__dict__` (under `_VIEW_KEY`).
+    The table refers back to its type, which makes a reference cycle that the
+    collector frees together with the class: no weak references, no global table
+    that would keep classes alive. `__build_class__` builds the table right after
+    the class is created, because adding a key to the dict of a class that the
+    guest is iterating would break the iteration. The tables of static types (which never die)
+    live in `_views`."""
+    __slots__ = ("tp", "tp_id", "tp_name", "tp_flags", "tp_mro_ids", "tp_chain",
                  "tp_dictkind", "tp_has_sequence", "tp_cache") + SLOT_FIELDS + STATIC_FIELDS
 
     def __init__(self, tp):
         ident = id(tp)
+        self.tp = tp
         self.tp_id = ident
-        self._tpref = weakref.ref(tp, lambda ref, ident=ident: _drop_view(ident, ref))
         mro = _tp_mro(tp)
         self.tp_mro_ids = frozenset([id(base) for base in mro])
-        chain = []
-        for base in mro:
-            if _tp_flags(base) & Py_TPFLAGS_HEAPTYPE:
-                chain.append(weakref.ref(base))
-            else:
-                chain.append(_tp_dict(base))    # a static type's dict never changes
-        self.tp_chain = tuple(chain)
+        # Live views of the dicts, so a change to a base shows up without rebuilding.
+        self.tp_chain = tuple([_tp_dict(base) for base in mro])
         self.tp_cache = {}          # name -> _PyType_Lookup result (the method cache)
         self.tp_flags = _tp_flags(tp) | _EXTRA_FLAGS.get(ident, 0)
         self.tp_name = _compute_tp_name(tp, self.tp_flags)
         self.tp_dictkind = DICT_NONE
-        self.tp_has_sequence = True
+        # A heap type always carries a PySequenceMethods; a static one only if it
+        # defines sq_* slots (listed in _HOST_TYPES).
+        self.tp_has_sequence = bool(self.tp_flags & Py_TPFLAGS_HEAPTYPE)
         for field in SLOT_FIELDS + STATIC_FIELDS:
             setattr(self, field, None)
 
     @property
     def type(self):
-        return self._tpref()
+        return self.tp
 
     @property
     def tp_mro(self):
-        return _tp_mro(self._tpref())
+        return _tp_mro(self.tp)
 
     def __repr__(self):
         return f"<PyTypeObject {self.tp_name}>"
-
-
-def _drop_view(ident, ref) -> None:
-    view = _views.get(ident)
-    if view is not None and view._tpref is ref:
-        del _views[ident]
-
-
-def _purge_dead_views(phase, info) -> None:
-    """A finalizer running inside a collection can create the view of a type the
-    collector already cleared; its weakref callback never fires. Purge such views
-    after each collection so a later type reusing the id cannot find them."""
-    if phase == "stop":
-        for ident, view in list(_views.items()):
-            if view._tpref() is None:
-                _views.pop(ident, None)
-
-
-gc.callbacks.append(_purge_dead_views)
 
 
 def _compute_tp_name(tp, flags) -> str:
@@ -254,9 +234,6 @@ def _register_host_type(tp, has_sequence, has_mapping, fields) -> None:
 
 
 def _register_host_types() -> None:
-    import array
-    import _collections
-    import re
     reg = _register_host_type
     # Objects/listobject.c: list_as_sequence, list_as_mapping
     reg(list, True, True, _SEQ_LIST + ("mp_length", "mp_subscript", "mp_ass_subscript"))
@@ -287,13 +264,6 @@ def _register_host_types() -> None:
     # Objects/memoryobject.c
     reg(memoryview, True, True, ("sq_length", "sq_item", "mp_length", "mp_subscript",
                                  "mp_ass_subscript"))
-    # Modules/_collectionsmodule.c: deque_slots
-    reg(_collections.deque, True, False, _SEQ_LIST)
-    # Modules/arraymodule.c: array_slots
-    reg(array.array, True, True, _SEQ_LIST + ("mp_length", "mp_subscript", "mp_ass_subscript"))
-    # Modules/_sre/sre.c: match_slots has Py_mp_subscript only
-    reg(type(re.match("", "")), False, True, ("mp_subscript",))
-    reg(type(re.compile("")), False, False, ())
     # Number types: nb_add / nb_multiply, no sequence or mapping
     for tp in (int, float, complex):
         reg(tp, False, False, ("nb_add", "nb_multiply"))
@@ -327,20 +297,26 @@ def _mro_host_fields(view) -> frozenset:
 
 # --- views --------------------------------------------------------------------
 
-_views: dict = {}              # id(host type) -> PyTypeObject (weakly tied to the type)
+_views: dict = {}              # id(static host type) -> PyTypeObject (static types never die)
 _views_get = _views.get
 _EXTRA_FLAGS: dict = {}        # id(host type) -> extra tp_flags (types pp defines in Python)
 _STATIC_SLOTS: dict = {}       # id(host type) -> {field: function}: "C" slots implemented by pp
 _C_WRAPPER_SLOTS: dict = {}    # (field, id(wrapper_descriptor)) -> function implemented by pp
 _object_getattribute = object.__dict__["__getattribute__"]
 _tp_dictoffset = type.__dict__["__dictoffset__"].__get__
+_type_setattr = type.__setattr__
+_type_delattr = type.__delattr__
+# The name is neither a protocol member for typing.Protocol (`_abc_` prefix) nor an
+# enum member for enum._simple_enum, which copies a class dict (sunder name).
+_VIEW_KEY = "_abc_pp_view_"
+_MUTABLE_HEAP = Py_TPFLAGS_HEAPTYPE | Py_TPFLAGS_IMMUTABLETYPE
 
 
 def register_static_slots(tp, flags=0, **slots) -> None:
     """Declare slots of a type pp implements itself (the C struct's initializers)."""
     _EXTRA_FLAGS[id(tp)] = flags
     _STATIC_SLOTS[id(tp)] = slots
-    _views.pop(id(tp), None)
+    PyType_Modified(tp)
 
 
 def register_wrapper_slot(field, wrapper, function) -> None:
@@ -349,24 +325,38 @@ def register_wrapper_slot(field, wrapper, function) -> None:
 
 
 def Py_TYPE(o) -> PyTypeObject:
-    tp = type(o)
-    view = _views_get(id(tp))
-    if view is None:
-        view = _new_view(tp)
-    return view
+    return PyType_View(type(o))
 
 
 def PyType_View(tp) -> PyTypeObject:
     """The PyTypeObject of a host type object."""
     view = _views_get(id(tp))
     if view is None:
-        view = _new_view(tp)
+        view = _type_dictget(_tp_dict(tp), _VIEW_KEY, None)
+        if type(view) is not PyTypeObject or view.tp is not tp:   # none yet, or copied
+            return _new_view(tp)
+    return view
+
+
+def _own_view(tp):
+    """The table of `tp` if one was built, else None."""
+    view = _views_get(id(tp))
+    if view is None:
+        view = _type_dictget(_tp_dict(tp), _VIEW_KEY, None)
+        if type(view) is not PyTypeObject or view.tp is not tp:
+            return None
     return view
 
 
 def _new_view(tp) -> PyTypeObject:
     view = PyTypeObject(tp)
-    _views[view.tp_id] = view
+    if view.tp_flags & _MUTABLE_HEAP == Py_TPFLAGS_HEAPTYPE:
+        try:
+            _type_setattr(tp, _VIEW_KEY, view)
+        except (TypeError, AttributeError):
+            pass                    # cannot be stored: rebuilt on every use
+    else:
+        _views[view.tp_id] = view
     fixup_slot_dispatchers(view)
     view.tp_dictkind = _find_dict_kind(tp, view)
     host = _HOST_TYPES.get(view.tp_id)
@@ -385,20 +375,15 @@ def _find_dict_kind(tp, view) -> int:
     return DICT_SPECIAL         # e.g. a class defining `__dict__` as a property
 
 
-_generic_get_dict = None
-
-
 def _PyObject_GenericGetDict(obj):
     """`PyObject_GenericGetDict`: the real instance dict, whatever `__dict__` means
-    to the class (the host has no other way to reach it)."""
-    global _generic_get_dict
-    if _generic_get_dict is None:
-        import ctypes
-        f = ctypes.pythonapi.PyObject_GenericGetDict
-        f.restype = ctypes.py_object
-        f.argtypes = (ctypes.py_object, ctypes.c_void_p)
-        _generic_get_dict = f
-    return _generic_get_dict(obj, None)
+    to the class: the `__dict__` getset that the type introducing the dict put in
+    its own dict."""
+    for base in _tp_mro(type(obj)):
+        descr = _type_dictget(_tp_dict(base), "__dict__", None)
+        if type(descr) is _GetSetDescr or type(descr) is _MemberDescr:
+            return descr.__get__(obj)
+    return None
 
 
 def _PyObject_GetDictPtr(obj, view):
@@ -414,13 +399,14 @@ def _PyObject_GetDictPtr(obj, view):
 def PyType_Modified(tp) -> None:
     """Drop the slot tables of `tp` and its subclasses (rebuilt lazily from the
     MRO). Called after any change to a type's dict or bases."""
-    _views.pop(id(tp), None)
+    if _views.pop(id(tp), None) is None and _own_view(tp) is not None:
+        _type_delattr(tp, _VIEW_KEY)
     for sub in _tp_subclasses(tp):
         PyType_Modified(sub)
 
 
 def _clear_lookup_cache(tp) -> None:
-    view = _views.get(id(tp))
+    view = _own_view(tp)
     if view is not None:
         view.tp_cache.clear()
     for sub in _tp_subclasses(tp):
@@ -463,8 +449,6 @@ _UNSET = object()
 
 def _type_lookup_uncached(tp, name):
     for entry in tp.tp_chain:
-        if type(entry) is _ReferenceType:
-            entry = _tp_dict(entry())
         res = _type_dictget(entry, name, NULL)
         if res is not NULL:
             return res
