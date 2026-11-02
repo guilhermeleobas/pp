@@ -128,15 +128,25 @@ def _PyErr_ChainStackItem(tstate, exc) -> None:
     _PyErr_SetObject(tstate, exc)
 
 
+def _mro_has(tp, base) -> bool:
+    """PyType_IsSubtype for host types: `base` is in the MRO of `tp`."""
+    for b in _tp_mro(tp) or ():
+        if b is base:
+            return True
+    return False
+
+
 def PyExceptionClass_Check(o) -> bool:
     """A class deriving from BaseException."""
+    if type(o) is type:
+        # PyType_Check holds; the subtype test is the MRO walk of PyType_IsSubtype.
+        return _mro_has(o, BaseException)
     from pp.typeobject import PyType_Check, PyType_IsSubtype, PyType_View
     return PyType_Check(o) and PyType_IsSubtype(PyType_View(o), PyType_View(BaseException))
 
 
 def PyErr_GivenExceptionMatches(err, exc) -> bool:
     """Does the exception (instance or class) `err` match `exc` (a class or a tuple)?"""
-    from pp.typeobject import PyType_IsSubtype, PyType_View
     if err is None or exc is None:
         return False
     if type(exc) is tuple:
@@ -147,7 +157,7 @@ def PyErr_GivenExceptionMatches(err, exc) -> bool:
     if _PyExceptionInstance_Check(err):
         err = type(err)
     if PyExceptionClass_Check(err) and PyExceptionClass_Check(exc):
-        return PyType_IsSubtype(PyType_View(err), PyType_View(exc))
+        return _mro_has(err, exc)
     return err is exc
 
 
