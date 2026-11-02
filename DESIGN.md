@@ -238,3 +238,15 @@ code (provide them via a VM-side `sys` override or document the gap).
 Known milestone 2 gaps that are acceptable: `async`, template strings
 (`BUILD_TEMPLATE`, `BUILD_INTERPOLATION`), VM frames in host tracebacks and
 `sys._getframe`, `locals()` write-back.
+
+### Milestone 2 clarifications
+
+- `VirtualMachine(path: list[str] | None = None)`: `path` is extra import
+  search directories (searched after `pp/lib` and the stdlib). The VM's module
+  table is `vm.modules`. `run_source(..., vm=None)` and `run_file(path, vm=None)`
+  accept an existing VM; by default each call creates a fresh one. `run_file`
+  adds the script's directory to the VM's path.
+- `DELETE_GLOBAL` is in milestone 2 scope.
+- `sys.exception()` / `sys.exc_info()` called from VM code must reflect the VM's
+  handled exception (not a documented gap).
+- `__file__` is an absolute, resolved path.
