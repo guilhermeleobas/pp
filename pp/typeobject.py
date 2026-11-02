@@ -404,8 +404,15 @@ def _descr_get_adapter(found):
     d = found["__get__"]
 
     def adapter(self, obj, tp):
+        if obj is None and tp is not NULL:
+            # Host wrappers read an obj of None as "class access"; the instance
+            # `None` can only be reached through the host's own generic getattr.
+            return _object_getattribute(None, self.__name__)
         return d(self, None if obj is NULL else obj, None if tp is NULL else tp)
     return adapter
+
+
+_object_getattribute = object.__dict__["__getattribute__"]
 
 
 def _setter_deleter_adapter(setname, delname):
