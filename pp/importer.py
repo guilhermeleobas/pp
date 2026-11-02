@@ -26,7 +26,6 @@ HOST_MODULES_PERMANENT = frozenset({
     "builtins",     # served as the VM's own builtins module
     "_imp",
     "_thread",
-    "_weakref",
     "_io",
     "posix",
     "errno",
