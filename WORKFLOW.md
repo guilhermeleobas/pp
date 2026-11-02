@@ -50,10 +50,14 @@ of the task, skipping or parking the blocked part. The orchestrator adds it to
 - GitHub: `guilhermeleobas/pp` (private). Development is local; no pull
   requests. The orchestrator pushes `main` from time to time (after merges).
   Agent branches stay local unless a remote session needs them.
-- Extra capacity: the `build machine` SSH host runs separate Claude sessions with a
-  clone at `~/git/pp`. Use it for CPU-heavy gate runs and independent tasks.
-  Remote sessions push their branch (`impl/<task>`, `test/<task>`) to GitHub;
-  the orchestrator fetches and merges it like a local branch.
+- **All agent work runs on `build machine`** (SSH host, many cores, clone at
+  `~/git/pp`): implementers, testers, reviewers, gates and judges are separate
+  Claude sessions there, each in its own worktree. They push their branch
+  (`impl/<task>`, `test/<task>`) to GitHub; the orchestrator (on the Mac)
+  fetches, merges into `main` per the judge's decision, regenerates the
+  dashboard and pushes. The Mac runs agents only when build machine is unavailable.
+- Remote sessions always `git fetch && git checkout origin/main` (or branch
+  from it) before starting, since `main` moves on the Mac.
 
 ## Budget
 
