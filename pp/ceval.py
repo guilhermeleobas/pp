@@ -1082,11 +1082,6 @@ class VirtualMachine:
         lhs = stack.pop()
         tl = type(lhs)
         tr = type(rhs)
-        if i.arg == _NB_SUBSCR and tl in _SUBSCRIPT_TYPES:
-            # BINARY_OP_SUBSCR_LIST_INT / _TUPLE_INT / _DICT / _STR_INT & co: the
-            # exact builtin container's own mp_subscript.
-            stack.append(lhs[rhs])
-            return
         if tl in _NUMBER_TYPES and tr in _NUMBER_TYPES:
             fn = _NUMBER_BINOPS[i.arg]
             if fn is not None:
@@ -1097,6 +1092,11 @@ class VirtualMachine:
             if fn is not None:
                 stack.append(fn(lhs, rhs))
                 return
+        if tl in _SUBSCRIPT_TYPES and i.arg == _NB_SUBSCR:
+            # BINARY_OP_SUBSCR_LIST_INT / _TUPLE_INT / _DICT / _STR_INT & co: the
+            # exact builtin container's own mp_subscript.
+            stack.append(lhs[rhs])
+            return
         stack.append(BINARY_OPS[i.arg](lhs, rhs))
 
     def BINARY_SLICE(self, f, i):
@@ -1209,26 +1209,24 @@ class VirtualMachine:
         f.stack.append(iter(v) if type(v) in _ITER_TYPES else PyObject_GetIter(v))
         f.stack.append(NULL)  # index_or_null: always NULL in pp
 
-    def FOR_ITER(self, f, i):
-        it = f.stack[-2]
-        stop = False
-        v = NULL
-        if type(it) in _FAST_ITERATORS:
+    def FOR_ITER(self, f, i, _fast=_FAST_ITERATORS, _next=_next, _MISSING=_MISSING, _type=type):
+        stack = f.stack
+        it = stack[-2]
+        if _type(it) in _fast:
             # FOR_ITER_LIST / _TUPLE / _RANGE & co: the C tp_iternext of an exact
             # builtin iterator, without the exception for the exhausted case.
             v = _next(it, _MISSING)
-            stop = v is _MISSING
+            if v is not _MISSING:
+                stack.append(v)
+                return
         else:
             try:
-                v = Py_TYPE(it).tp_iternext(it)
+                stack.append(Py_TYPE(it).tp_iternext(it))
+                return
             except StopIteration:
-                stop = True
-        if stop:
-            # Exhausted: jump past the END_FOR at the target, leaving iter/null for POP_ITER.
-            _PyErr_Clear(self.tstate)
-            f.instr_offset = i.jump_target + 2
-            return
-        f.stack.append(v)
+                _PyErr_Clear(self.tstate)
+        # Exhausted: jump past the END_FOR at the target, leaving iter/null for POP_ITER.
+        f.instr_offset = i.jump_target + 2
 
     def END_FOR(self, f, i):
         f.stack.pop()
@@ -1348,7 +1346,7 @@ class VirtualMachine:
                 descr = view.tp_cache.get(name, _UNSET)
                 if descr is not _UNSET and (type(descr) is Function or type(descr) is _MethodDescriptorType):
                     kind = view.tp_dictkind
-                    if kind == DICT_NONE or (kind == DICT_STD and name not in _object_getattribute(owner, "__dict__")):
+                    if kind == DICT_NONE or (kind == DICT_STD and name not in owner.__dict__):
                         f.stack.append(descr)
                         f.stack.append(owner)
                         return
@@ -1365,7 +1363,7 @@ class VirtualMachine:
                     # (not even a non-data descriptor) shadows it.
                     descr = view.tp_cache.get(name, _UNSET)
                     if descr is NULL:
-                        res = _dict_get(_object_getattribute(owner, "__dict__"), name, NULL)
+                        res = owner.__dict__.get(name, NULL)
                         if res is not NULL:
                             f.stack.append(res)
                             return
