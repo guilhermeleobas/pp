@@ -53,6 +53,7 @@ _BuiltinFunction = types.BuiltinFunctionType
 _MethodType = types.MethodType
 _views_get = _typeobject._views_get
 _OwnRef = _typeobject._OwnRef
+_slot_tp_iternext = _typeobject.slot_tp_iternext
 
 _next = next
 _FAST_ITERATORS = frozenset((type(iter([])), type(iter(())), type(iter(range(1))), type(iter("")),
@@ -1323,7 +1324,16 @@ class VirtualMachine:
             _PyErr_Clear(self.tstate)
         else:
             try:
-                stack.append(Py_TYPE(it).tp_iternext(it))
+                iternext = Py_TYPE(it).tp_iternext
+                if iternext is _slot_tp_iternext:
+                    # slot_tp_iternext of a class whose __next__ is a VM function:
+                    # call it (vectorcall_method's unbound call) without the slot
+                    # function's lookup / vectorcall layers.
+                    meth = _PyType_Lookup(_type(it), "__next__")
+                    if _type(meth) is Function and meth._vm is self:
+                        stack.append(self.call_function(meth, (it,), None))
+                        return
+                stack.append(iternext(it))
                 return
             except StopIteration:
                 _PyErr_Clear(self.tstate)
