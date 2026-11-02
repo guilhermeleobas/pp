@@ -28,12 +28,26 @@ SET_ADD SET_UPDATE MAP_ADD DICT_UPDATE UNPACK_SEQUENCE UNPACK_EX FORMAT_SIMPLE
 FORMAT_WITH_SPEC CONVERT_VALUE LOAD_ATTR STORE_ATTR DELETE_ATTR RETURN_VALUE
 """.split())
 
-# Snippets expected to need features beyond Milestone 1 (feature name).
+# Milestone 2 opcodes (DESIGN.md "Milestone 2"); the LOAD_FAST*/STORE_FAST*
+# families are expanded to every 3.15 opcode with those prefixes.
+MILESTONE_2 = frozenset("""
+DELETE_FAST LOAD_FAST_AND_CLEAR LOAD_FAST_CHECK MAKE_CELL LOAD_DEREF STORE_DEREF
+DELETE_DEREF DELETE_GLOBAL COPY_FREE_VARS LOAD_FROM_DICT_OR_DEREF LOAD_FROM_DICT_OR_GLOBALS
+LOAD_LOCALS MAKE_FUNCTION SET_FUNCTION_ATTRIBUTE RETURN_GENERATOR YIELD_VALUE
+SEND END_SEND CLEANUP_THROW CALL_FUNCTION_EX CALL_INTRINSIC_1 CALL_INTRINSIC_2
+LOAD_BUILD_CLASS LOAD_SUPER_ATTR SETUP_ANNOTATIONS RAISE_VARARGS RERAISE
+PUSH_EXC_INFO POP_EXCEPT CHECK_EXC_MATCH CHECK_EG_MATCH WITH_EXCEPT_START
+LOAD_SPECIAL IMPORT_NAME IMPORT_FROM GET_LEN MATCH_CLASS MATCH_MAPPING
+MATCH_SEQUENCE MATCH_KEYS DICT_MERGE
+""".split()) | {op for op in dis.opmap
+                if op.startswith(("LOAD_FAST", "STORE_FAST")) and op != "STORE_FAST_MAYBE_NULL"}
+SUPPORTED = MILESTONE_1 | MILESTONE_2
+
+# Snippets expected to need features beyond Milestone 2 (feature name).
 # Cross-checked against `dis` by test_scope_table.
 OUT_OF_SCOPE = {
-    "xfail_def": "def / function calls",
-    "xfail_listcomp": "comprehensions (fast locals)",
-    "xfail_try_except": "exception handling",
+    "xfail_async": "async def / await",
+    "xfail_tstring": "template strings",
 }
 
 
@@ -43,7 +57,7 @@ def missing_opcodes(src, filename):
         c = stack.pop()
         ops |= {i.opname for i in dis.get_instructions(c)}
         stack += [k for k in c.co_consts if isinstance(k, types.CodeType)]
-    return sorted(ops - MILESTONE_1)
+    return sorted(ops - SUPPORTED)
 
 
 def _params():
@@ -141,8 +155,21 @@ def test_exceptions_not_wrapped():
 
 def test_unimplemented_opcode():
     assert issubclass(pp.errors.UnimplementedOpcode, NotImplementedError)
-    src = "x = 1\nimport os\n"
-    assert "IMPORT_NAME" in missing_opcodes(src, "<s>")
+    src = 'x = 1\nt = t"{x}"\n'
+    assert "BUILD_TEMPLATE" in missing_opcodes(src, "<s>")
     with pytest.raises(pp.errors.UnimplementedOpcode) as ei:
         pp.run_source(src)
-    assert "IMPORT_NAME" in str(ei.value)
+    assert "BUILD_INTERPOLATION" in str(ei.value) or "BUILD_TEMPLATE" in str(ei.value)
+
+
+def test_globals_without_builtins_gets_them():
+    g = {"__name__": "m", "x": 2}
+    res = pp.run_source("y = x + len([1])\n", globals=g)
+    assert res is g and g["y"] == 3
+    assert "__builtins__" in g
+
+
+def test_uncaught_exception_type_and_args():
+    with pytest.raises(KeyError) as ei:
+        pp.run_source("def f():\n    return {}['k']\nf()\n")
+    assert ei.value.args == ("k",)

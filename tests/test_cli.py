@@ -25,3 +25,12 @@ def test_run_and_dis(tmp_path):
     assert res.returncode == 0, res.stderr
     for name in ("RESUME", "MAKE_FUNCTION", "STORE_NAME", "BINARY_OP", "RETURN_VALUE"):
         assert name in res.stdout, name
+
+
+def test_run_uncaught_exception(tmp_path):
+    f = tmp_path / "boom.py"
+    f.write_text("print('before')\nd = {}\nd['nope']\n")
+    res = run("-m", "pp", "run", str(f))
+    assert res.returncode == 1
+    assert res.stdout == "before\n"
+    assert "Traceback" in res.stderr and "KeyError" in res.stderr and "nope" in res.stderr

@@ -114,6 +114,14 @@ def test_at_index_of_and_cache():
     for idx, ins in enumerate(d.instructions):
         assert d.at(ins.offset) is ins
         assert d.index_of(ins.offset) == idx
+    starts = {ins.offset for ins in d.instructions}
+    bad = [o for o in range(1, d.instructions[-1].offset + 2) if o not in starts]
+    assert bad
+    for o in bad[:20] + [-2, 10**6]:
+        with pytest.raises(KeyError):
+            d.at(o)
+        with pytest.raises(KeyError):
+            d.index_of(o)
 
 
 def _stdlib_files():
