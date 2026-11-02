@@ -239,6 +239,12 @@ def _find(data, ch, start, end):
         return -1
 
 
+# Frame kinds of the explicit matcher stack (see _State._match).
+(F_BRANCH, F_REPEAT_ONE, F_MIN_REPEAT_ONE, F_REPEAT, F_UNTIL_MIN, F_UNTIL_TAIL,
+ F_MAX_UNTIL, F_MIN_UNTIL, F_MIN_UNTIL_BODY, F_POSSESSIVE, F_ATOMIC, F_ASSERT,
+ F_ASSERT_NOT) = range(13)
+
+
 class _Repeat:
     __slots__ = ("count", "pc", "prev", "last_ptr")
 
@@ -523,11 +529,17 @@ class _State:
         """Run code from pc up to its SUCCESS, starting at self.ptr.
 
         Returns True/False; on success self.ptr is the end of the match.
+
+        Like sre_lib.h this is one loop over an explicit stack: whatever C
+        would DO_JUMP into is a pushed frame, and a frame's first item says
+        where to resume once the sub-match it started has returned.
         """
         code = self.code
         data = self.data
         end = self.end
         ptr = self.ptr
+        stack = []
+        push = stack.append
 
         if code[pc] == INFO:
             if code[pc + 3] and end - ptr < code[pc + 3]:
@@ -535,450 +547,531 @@ class _State:
             pc += code[pc + 1] + 1
 
         while True:
-            op = code[pc]
-            pc += 1
-
-            if op == LITERAL:
-                if ptr >= end or data[ptr] != code[pc]:
-                    return False
-                pc += 1
-                ptr += 1
-
-            elif op == MARK:
-                i = code[pc]
-                if i & 1:
-                    self.lastindex = i // 2 + 1
-                if i > self.lastmark:
-                    mark = self.mark
-                    j = self.lastmark + 1
-                    while j < i:
-                        mark[j] = None
-                        j += 1
-                    self.lastmark = i
-                self.mark[i] = ptr
+            # -- run: execute ops until one fails or SUCCESS is reached
+            ret = False
+            while True:
+                op = code[pc]
                 pc += 1
 
-            elif op == SUCCESS:
-                if toplevel and ((self.match_all and ptr != self.end) or
-                                 (self.must_advance and ptr == self.start)):
-                    return False
-                self.ptr = ptr
-                return True
+                if op == LITERAL:
+                    if ptr >= end or data[ptr] != code[pc]:
+                        break
+                    pc += 1
+                    ptr += 1
 
-            elif op == IN:
-                if ptr >= end or not self._charset(pc + 1, data[ptr]):
-                    return False
-                pc += code[pc]
-                ptr += 1
+                elif op == MARK:
+                    i = code[pc]
+                    if i & 1:
+                        self.lastindex = i // 2 + 1
+                    if i > self.lastmark:
+                        mark = self.mark
+                        j = self.lastmark + 1
+                        while j < i:
+                            mark[j] = None
+                            j += 1
+                        self.lastmark = i
+                    self.mark[i] = ptr
+                    pc += 1
 
-            elif op == ANY:
-                if ptr >= end or data[ptr] == 10:
-                    return False
-                ptr += 1
+                elif op == SUCCESS:
+                    if toplevel and ((self.match_all and ptr != end) or
+                                     (self.must_advance and ptr == self.start)):
+                        break
+                    ret = True
+                    rptr = ptr
+                    break
 
-            elif op == ANY_ALL:
-                if ptr >= end:
-                    return False
-                ptr += 1
+                elif op == IN:
+                    if ptr >= end or not self._charset(pc + 1, data[ptr]):
+                        break
+                    pc += code[pc]
+                    ptr += 1
 
-            elif op == NOT_LITERAL:
-                if ptr >= end or data[ptr] == code[pc]:
-                    return False
-                pc += 1
-                ptr += 1
+                elif op == ANY:
+                    if ptr >= end or data[ptr] == 10:
+                        break
+                    ptr += 1
 
-            elif op == AT:
-                if not self._at(ptr, code[pc]):
-                    return False
-                pc += 1
+                elif op == ANY_ALL:
+                    if ptr >= end:
+                        break
+                    ptr += 1
 
-            elif op == CATEGORY:
-                if ptr >= end or not _category(code[pc], data[ptr]):
-                    return False
-                pc += 1
-                ptr += 1
+                elif op == NOT_LITERAL:
+                    if ptr >= end or data[ptr] == code[pc]:
+                        break
+                    pc += 1
+                    ptr += 1
 
-            elif op == LITERAL_IGNORE:
-                if ptr >= end or _lower_ascii(data[ptr]) != code[pc]:
-                    return False
-                pc += 1
-                ptr += 1
+                elif op == AT:
+                    if not self._at(ptr, code[pc]):
+                        break
+                    pc += 1
 
-            elif op == LITERAL_UNI_IGNORE:
-                if ptr >= end or _lower_unicode(data[ptr]) != code[pc]:
-                    return False
-                pc += 1
-                ptr += 1
+                elif op == CATEGORY:
+                    if ptr >= end or not _category(code[pc], data[ptr]):
+                        break
+                    pc += 1
+                    ptr += 1
 
-            elif op == LITERAL_LOC_IGNORE:
-                if ptr >= end or not _char_loc_ignore(code[pc], data[ptr]):
-                    return False
-                pc += 1
-                ptr += 1
+                elif op == LITERAL_IGNORE:
+                    if ptr >= end or _lower_ascii(data[ptr]) != code[pc]:
+                        break
+                    pc += 1
+                    ptr += 1
 
-            elif op == NOT_LITERAL_IGNORE:
-                if ptr >= end or _lower_ascii(data[ptr]) == code[pc]:
-                    return False
-                pc += 1
-                ptr += 1
+                elif op == LITERAL_UNI_IGNORE:
+                    if ptr >= end or _lower_unicode(data[ptr]) != code[pc]:
+                        break
+                    pc += 1
+                    ptr += 1
 
-            elif op == NOT_LITERAL_UNI_IGNORE:
-                if ptr >= end or _lower_unicode(data[ptr]) == code[pc]:
-                    return False
-                pc += 1
-                ptr += 1
+                elif op == LITERAL_LOC_IGNORE:
+                    if ptr >= end or not _char_loc_ignore(code[pc], data[ptr]):
+                        break
+                    pc += 1
+                    ptr += 1
 
-            elif op == NOT_LITERAL_LOC_IGNORE:
-                if ptr >= end or _char_loc_ignore(code[pc], data[ptr]):
-                    return False
-                pc += 1
-                ptr += 1
+                elif op == NOT_LITERAL_IGNORE:
+                    if ptr >= end or _lower_ascii(data[ptr]) == code[pc]:
+                        break
+                    pc += 1
+                    ptr += 1
 
-            elif op == IN_IGNORE:
-                if ptr >= end or not self._charset(pc + 1, _lower_ascii(data[ptr])):
-                    return False
-                pc += code[pc]
-                ptr += 1
+                elif op == NOT_LITERAL_UNI_IGNORE:
+                    if ptr >= end or _lower_unicode(data[ptr]) == code[pc]:
+                        break
+                    pc += 1
+                    ptr += 1
 
-            elif op == IN_UNI_IGNORE:
-                if ptr >= end or not self._charset(pc + 1, _lower_unicode(data[ptr])):
-                    return False
-                pc += code[pc]
-                ptr += 1
+                elif op == NOT_LITERAL_LOC_IGNORE:
+                    if ptr >= end or _char_loc_ignore(code[pc], data[ptr]):
+                        break
+                    pc += 1
+                    ptr += 1
 
-            elif op == IN_LOC_IGNORE:
-                if ptr >= end or not self._charset_loc_ignore(pc + 1, data[ptr]):
-                    return False
-                pc += code[pc]
-                ptr += 1
+                elif op == IN_IGNORE:
+                    if ptr >= end or not self._charset(pc + 1, _lower_ascii(data[ptr])):
+                        break
+                    pc += code[pc]
+                    ptr += 1
 
-            elif op == JUMP or op == INFO:
-                pc += code[pc]
+                elif op == IN_UNI_IGNORE:
+                    if ptr >= end or not self._charset(pc + 1, _lower_unicode(data[ptr])):
+                        break
+                    pc += code[pc]
+                    ptr += 1
 
-            elif op == BRANCH:
-                lastmark = self.lastmark
-                lastindex = self.lastindex
-                saved = self.mark[:lastmark + 1] if lastmark >= 0 else None
-                while code[pc]:
-                    first = code[pc + 1]
-                    if first == LITERAL and (ptr >= end or data[ptr] != code[pc + 2]):
-                        pc += code[pc]
-                        continue
-                    if first == IN and (ptr >= end or
-                                        not self._charset(pc + 3, data[ptr])):
-                        pc += code[pc]
-                        continue
+                elif op == IN_LOC_IGNORE:
+                    if ptr >= end or not self._charset_loc_ignore(pc + 1, data[ptr]):
+                        break
+                    pc += code[pc]
+                    ptr += 1
+
+
+                elif op == JUMP or op == INFO:
+                    pc += code[pc]
+
+                elif op == BRANCH:
+                    lastmark = self.lastmark
+                    saved = self.mark[:lastmark + 1] if lastmark >= 0 else None
+                    push((F_BRANCH, pc, ptr, lastmark, self.lastindex, saved,
+                          toplevel))
+                    break
+
+                elif op == REPEAT_ONE:
+                    # <REPEAT_ONE> <skip> <1=min> <2=max> item <SUCCESS> tail
+                    rmin = code[pc + 1]
+                    if rmin > end - ptr:
+                        break
                     self.ptr = ptr
-                    if self._match(pc + 1, toplevel):
-                        return True
+                    count = self._count(pc + 3, code[pc + 2])
+                    ptr += count
+                    if count < rmin:
+                        break
+                    tail = pc + code[pc]
+                    if (code[tail] == SUCCESS and
+                            not (toplevel and ((self.match_all and ptr != end) or
+                                               (self.must_advance and ptr == self.start)))):
+                        # nothing follows, so the longest run is the match
+                        ret = True
+                        rptr = ptr
+                        break
+                    lastmark = self.lastmark
+                    saved = self.mark[:lastmark + 1] if lastmark >= 0 else None
+                    chr_ = code[tail + 1] if code[tail] == LITERAL else -1
+                    push((F_REPEAT_ONE, tail, ptr, count, rmin, lastmark,
+                          self.lastindex, saved, toplevel, chr_))
+                    break
+
+                elif op == MIN_REPEAT_ONE:
+                    # <MIN_REPEAT_ONE> <skip> <1=min> <2=max> item <SUCCESS> tail
+                    rmin = code[pc + 1]
+                    rmax = code[pc + 2]
+                    if rmin > end - ptr:
+                        break
+                    if rmin == 0:
+                        count = 0
+                    else:
+                        self.ptr = ptr
+                        count = self._count(pc + 3, rmin)
+                        if count < rmin:
+                            break
+                        ptr += count
+                    tail = pc + code[pc]
+                    if (code[tail] == SUCCESS and
+                            not (toplevel and ((self.match_all and ptr != end) or
+                                               (self.must_advance and ptr == self.start)))):
+                        ret = True
+                        rptr = ptr
+                        break
+                    if not (rmax == MAXREPEAT or count <= rmax):
+                        break
+                    lastmark = self.lastmark
+                    saved = self.mark[:lastmark + 1] if lastmark >= 0 else None
+                    push((F_MIN_REPEAT_ONE, pc, tail, ptr, count, rmax,
+                          lastmark, self.lastindex, saved, toplevel))
+                    pc = tail
+
+                elif op == POSSESSIVE_REPEAT_ONE:
+                    rmin = code[pc + 1]
+                    if ptr + rmin > end:
+                        break
+                    self.ptr = ptr
+                    count = self._count(pc + 3, code[pc + 2])
+                    ptr += count
+                    if count < rmin:
+                        break
+                    pc += code[pc]
+                    if (code[pc] == SUCCESS and ptr == end and
+                            not (toplevel and self.must_advance and ptr == self.start)):
+                        ret = True
+                        rptr = ptr
+                        break
+
+                elif op == REPEAT:
+                    # <REPEAT> <skip> <1=min> <2=max> item <UNTIL> tail
+                    push((F_REPEAT, self.repeat))
+                    self.repeat = _Repeat(pc, self.repeat)
+                    pc += code[pc]
+
+                elif op == MAX_UNTIL:
+                    rep = self.repeat
+                    if rep is None:
+                        raise SystemError("internal error in regular expression engine")
+                    count = rep.count + 1
+                    rpc = rep.pc
+                    if count < code[rpc + 1]:
+                        rep.count = count
+                        push((F_UNTIL_MIN, rep, count))
+                        pc = rpc + 3
+                        continue
+                    if ((count < code[rpc + 2] or code[rpc + 2] == MAXREPEAT) and
+                            ptr != rep.last_ptr):
+                        rep.count = count
+                        lastmark = self.lastmark
+                        saved = self.mark[:lastmark + 1] if lastmark >= 0 else None
+                        push((F_MAX_UNTIL, rep, count, ptr, lastmark,
+                              self.lastindex, saved, rep.last_ptr, pc, toplevel))
+                        rep.last_ptr = ptr
+                        pc = rpc + 3
+                        continue
+                    push((F_UNTIL_TAIL, rep))
+                    self.repeat = rep.prev
+
+                elif op == MIN_UNTIL:
+                    rep = self.repeat
+                    if rep is None:
+                        raise SystemError("internal error in regular expression engine")
+                    count = rep.count + 1
+                    rpc = rep.pc
+                    if count < code[rpc + 1]:
+                        rep.count = count
+                        push((F_UNTIL_MIN, rep, count))
+                        pc = rpc + 3
+                        continue
+                    self.repeat = rep.prev
+                    lastmark = self.lastmark
+                    saved = self.mark[:lastmark + 1] if lastmark >= 0 else None
+                    push((F_MIN_UNTIL, rep, count, ptr, lastmark,
+                          self.lastindex, saved, rpc, toplevel))
+
+                elif op == POSSESSIVE_REPEAT:
+                    # <POSSESSIVE_REPEAT> <skip> <1=min> <2=max> item <SUCCESS> tail
+                    # Seed a frame as if a zeroth item had just matched; its
+                    # resume code then drives the min and max phases.
+                    push((F_POSSESSIVE, pc, self.repeat, -1, -1, ptr, 0, 0,
+                          None, toplevel, 1))
+                    self.repeat = _Repeat(None, self.repeat)
+                    ret = True
+                    rptr = ptr
+                    break
+
+                elif op == ATOMIC_GROUP:
+                    # <ATOMIC_GROUP> <skip> pattern <SUCCESS> tail
+                    push((F_ATOMIC, pc, toplevel))
+                    pc += 1
+                    toplevel = False
+
+                elif op == GROUPREF:
+                    ptr = self._groupref(pc, ptr, None)
+                    if ptr < 0:
+                        break
+                    pc += 1
+
+                elif op == GROUPREF_IGNORE:
+                    ptr = self._groupref(pc, ptr, _lower_ascii)
+                    if ptr < 0:
+                        break
+                    pc += 1
+
+                elif op == GROUPREF_UNI_IGNORE:
+                    ptr = self._groupref(pc, ptr, _lower_unicode)
+                    if ptr < 0:
+                        break
+                    pc += 1
+
+                elif op == GROUPREF_LOC_IGNORE:
+                    ptr = self._groupref(pc, ptr, _lower_locale)
+                    if ptr < 0:
+                        break
+                    pc += 1
+
+                elif op == GROUPREF_EXISTS:
+                    # <GROUPREF_EXISTS> <group> <skip> codeyes <JUMP> codeno ...
+                    groupref = code[pc] * 2
+                    if groupref >= self.lastmark:
+                        pc += code[pc + 1]
+                    else:
+                        p = self.mark[groupref]
+                        e = self.mark[groupref + 1]
+                        if p is None or e is None or e < p:
+                            pc += code[pc + 1]
+                        else:
+                            pc += 2
+
+                elif op == ASSERT:
+                    # <ASSERT> <skip> <back> <pattern>
+                    back = code[pc + 1]
+                    if ptr < back:
+                        break
+                    push((F_ASSERT, pc, ptr, toplevel))
+                    ptr -= back
+                    pc += 2
+                    toplevel = False
+
+                elif op == ASSERT_NOT:
+                    back = code[pc + 1]
+                    if ptr >= back:
+                        lastmark = self.lastmark
+                        saved = self.mark[:lastmark + 1] if lastmark >= 0 else None
+                        push((F_ASSERT_NOT, pc, ptr, lastmark, self.lastindex,
+                              saved, toplevel))
+                        ptr -= back
+                        pc += 2
+                        toplevel = False
+                    else:
+                        pc += code[pc]
+
+                elif op == FAILURE:
+                    break
+
+                else:
+                    raise RuntimeError("internal error in regular expression engine")
+
+            # -- resume: hand the result to the frame that started this run
+            while True:
+                if not stack:
+                    if ret:
+                        self.ptr = rptr
+                    return ret
+                frame = stack.pop()
+                kind = frame[0]
+
+                if kind == F_BRANCH:
+                    if ret:
+                        continue
+                    _, pc, ptr, lastmark, lastindex, saved, toplevel = frame
                     if saved is not None:
                         self.mark[:lastmark + 1] = saved
                     self.lastmark = lastmark
                     self.lastindex = lastindex
-                    pc += code[pc]
-                return False
+                    # pc is the next alternative's skip word
+                    while code[pc]:
+                        first = code[pc + 1]
+                        if first == LITERAL and (ptr >= end or data[ptr] != code[pc + 2]):
+                            pc += code[pc]
+                            continue
+                        if first == IN and (ptr >= end or
+                                            not self._charset(pc + 3, data[ptr])):
+                            pc += code[pc]
+                            continue
+                        push((F_BRANCH, pc + code[pc], ptr, lastmark, lastindex,
+                              saved, toplevel))
+                        pc += 1
+                        break
+                    else:
+                        continue
+                    break
 
-            elif op == REPEAT_ONE:
-                # <REPEAT_ONE> <skip> <1=min> <2=max> item <SUCCESS> tail
-                rmin = code[pc + 1]
-                if rmin > end - ptr:
-                    return False
-                self.ptr = ptr
-                count = self._count(pc + 3, code[pc + 2])
-                ptr += count
-                if count < rmin:
-                    return False
-                tail = pc + code[pc]
-                if (code[tail] == SUCCESS and ptr == end and
-                        not (toplevel and self.must_advance and ptr == self.start)):
-                    self.ptr = ptr
-                    return True
-                lastmark = self.lastmark
-                lastindex = self.lastindex
-                saved = self.mark[:lastmark + 1] if lastmark >= 0 else None
-                if code[tail] == LITERAL:
-                    chr_ = code[tail + 1]
-                    while True:
+                elif kind == F_REPEAT_ONE:
+                    if ret:
+                        continue
+                    (_, tail, ptr, count, rmin, lastmark, lastindex, saved,
+                     toplevel, chr_) = frame
+                    if saved is not None:
+                        self.mark[:lastmark + 1] = saved
+                    self.lastmark = lastmark
+                    self.lastindex = lastindex
+                    if chr_ >= 0:
                         while count >= rmin and (ptr >= end or data[ptr] != chr_):
                             ptr -= 1
                             count -= 1
-                        if count < rmin:
-                            break
-                        self.ptr = ptr
-                        if self._match(tail, toplevel):
-                            return True
-                        if saved is not None:
-                            self.mark[:lastmark + 1] = saved
-                        self.lastmark = lastmark
-                        self.lastindex = lastindex
-                        ptr -= 1
-                        count -= 1
-                else:
-                    while count >= rmin:
-                        self.ptr = ptr
-                        if self._match(tail, toplevel):
-                            return True
-                        if saved is not None:
-                            self.mark[:lastmark + 1] = saved
-                        self.lastmark = lastmark
-                        self.lastindex = lastindex
-                        ptr -= 1
-                        count -= 1
-                return False
-
-            elif op == MIN_REPEAT_ONE:
-                # <MIN_REPEAT_ONE> <skip> <1=min> <2=max> item <SUCCESS> tail
-                rmin = code[pc + 1]
-                rmax = code[pc + 2]
-                if rmin > end - ptr:
-                    return False
-                self.ptr = ptr
-                if rmin == 0:
-                    count = 0
-                else:
-                    count = self._count(pc + 3, rmin)
                     if count < rmin:
-                        return False
-                    ptr += count
-                tail = pc + code[pc]
-                if (code[tail] == SUCCESS and
-                        not (toplevel and ((self.match_all and ptr != self.end) or
-                                           (self.must_advance and ptr == self.start)))):
-                    self.ptr = ptr
-                    return True
-                lastmark = self.lastmark
-                lastindex = self.lastindex
-                saved = self.mark[:lastmark + 1] if lastmark >= 0 else None
-                while rmax == MAXREPEAT or count <= rmax:
-                    self.ptr = ptr
-                    if self._match(tail, toplevel):
-                        return True
+                        continue
+                    push((F_REPEAT_ONE, tail, ptr - 1, count - 1, rmin, lastmark,
+                          lastindex, saved, toplevel, chr_))
+                    pc = tail
+                    break
+
+                elif kind == F_MIN_REPEAT_ONE:
+                    if ret:
+                        continue
+                    (_, rpc, tail, ptr, count, rmax, lastmark, lastindex, saved,
+                     toplevel) = frame
                     if saved is not None:
                         self.mark[:lastmark + 1] = saved
                     self.lastmark = lastmark
                     self.lastindex = lastindex
                     self.ptr = ptr
-                    if self._count(pc + 3, 1) == 0:
-                        break
+                    if self._count(rpc + 3, 1) == 0:
+                        continue
                     ptr += 1
                     count += 1
-                return False
+                    if not (rmax == MAXREPEAT or count <= rmax):
+                        continue
+                    push((F_MIN_REPEAT_ONE, rpc, tail, ptr, count, rmax, lastmark,
+                          lastindex, saved, toplevel))
+                    pc = tail
+                    break
 
-            elif op == POSSESSIVE_REPEAT_ONE:
-                rmin = code[pc + 1]
-                if ptr + rmin > end:
-                    return False
-                self.ptr = ptr
-                count = self._count(pc + 3, code[pc + 2])
-                ptr += count
-                if count < rmin:
-                    return False
-                pc += code[pc]
-                if (code[pc] == SUCCESS and ptr == end and
-                        not (toplevel and self.must_advance and ptr == self.start)):
-                    self.ptr = ptr
-                    return True
+                elif kind == F_REPEAT:
+                    self.repeat = frame[1]
 
-            elif op == REPEAT:
-                # <REPEAT> <skip> <1=min> <2=max> item <UNTIL> tail
-                rep = _Repeat(pc, self.repeat)
-                self.repeat = rep
-                self.ptr = ptr
-                ret = self._match(pc + code[pc], toplevel)
-                self.repeat = rep.prev
-                return ret
+                elif kind == F_UNTIL_MIN:
+                    # below the minimum: the body failed, give the count back
+                    if not ret:
+                        frame[1].count = frame[2] - 1
 
-            elif op == MAX_UNTIL:
-                rep = self.repeat
-                if rep is None:
-                    raise SystemError("internal error in regular expression engine")
-                self.ptr = ptr
-                count = rep.count + 1
-                rpc = rep.pc
-                if count < code[rpc + 1]:
-                    rep.count = count
-                    if self._match(rpc + 3, toplevel):
-                        return True
-                    rep.count = count - 1
-                    self.ptr = ptr
-                    return False
-                if ((count < code[rpc + 2] or code[rpc + 2] == MAXREPEAT) and
-                        self.ptr != rep.last_ptr):
-                    rep.count = count
-                    lastmark = self.lastmark
-                    lastindex = self.lastindex
-                    saved = self.mark[:lastmark + 1] if lastmark >= 0 else None
-                    last_ptr = rep.last_ptr
-                    rep.last_ptr = self.ptr
-                    ret = self._match(rpc + 3, toplevel)
+                elif kind == F_UNTIL_TAIL:
+                    self.repeat = frame[1]
+
+                elif kind == F_MAX_UNTIL:
+                    (_, rep, count, ptr, lastmark, lastindex, saved, last_ptr,
+                     pc, toplevel) = frame
                     rep.last_ptr = last_ptr
                     if ret:
-                        return True
+                        continue
                     if saved is not None:
                         self.mark[:lastmark + 1] = saved
                     self.lastmark = lastmark
                     self.lastindex = lastindex
                     rep.count = count - 1
-                    self.ptr = ptr
-                self.repeat = rep.prev
-                ret = self._match(pc, toplevel)
-                self.repeat = rep
-                if ret:
-                    return True
-                self.ptr = ptr
-                return False
+                    # body failed: try what follows the repeat
+                    push((F_UNTIL_TAIL, rep))
+                    self.repeat = rep.prev
+                    break
 
-            elif op == MIN_UNTIL:
-                rep = self.repeat
-                if rep is None:
-                    raise SystemError("internal error in regular expression engine")
-                self.ptr = ptr
-                count = rep.count + 1
-                rpc = rep.pc
-                if count < code[rpc + 1]:
+                elif kind == F_MIN_UNTIL:
+                    (_, rep, count, ptr, lastmark, lastindex, saved, rpc,
+                     toplevel) = frame
+                    self.repeat = rep
+                    if ret:
+                        continue
+                    if saved is not None:
+                        self.mark[:lastmark + 1] = saved
+                    self.lastmark = lastmark
+                    self.lastindex = lastindex
+                    if ((count >= code[rpc + 2] and code[rpc + 2] != MAXREPEAT) or
+                            ptr == rep.last_ptr):
+                        continue
                     rep.count = count
-                    if self._match(rpc + 3, toplevel):
-                        return True
-                    rep.count = count - 1
-                    self.ptr = ptr
-                    return False
-                self.repeat = rep.prev
-                lastmark = self.lastmark
-                lastindex = self.lastindex
-                saved = self.mark[:lastmark + 1] if lastmark >= 0 else None
-                ret = self._match(pc, toplevel)
-                self.repeat = rep
-                if ret:
-                    return True
-                if saved is not None:
-                    self.mark[:lastmark + 1] = saved
-                self.lastmark = lastmark
-                self.lastindex = lastindex
-                self.ptr = ptr
-                if ((count >= code[rpc + 2] and code[rpc + 2] != MAXREPEAT) or
-                        self.ptr == rep.last_ptr):
-                    return False
-                rep.count = count
-                last_ptr = rep.last_ptr
-                rep.last_ptr = self.ptr
-                ret = self._match(rpc + 3, toplevel)
-                rep.last_ptr = last_ptr
-                if ret:
-                    return True
-                rep.count = count - 1
-                self.ptr = ptr
-                return False
+                    push((F_MIN_UNTIL_BODY, rep, count, rep.last_ptr))
+                    rep.last_ptr = ptr
+                    pc = rpc + 3
+                    break
 
-            elif op == POSSESSIVE_REPEAT:
-                # <POSSESSIVE_REPEAT> <skip> <1=min> <2=max> item <SUCCESS> tail
-                self.ptr = ptr
-                saved_repeat = self.repeat
-                self.repeat = _Repeat(None, saved_repeat)
-                count = 0
-                rmin = code[pc + 1]
-                rmax = code[pc + 2]
-                while count < rmin:
-                    if self._match(pc + 3, False):
+                elif kind == F_MIN_UNTIL_BODY:
+                    frame[1].last_ptr = frame[3]
+                    if not ret:
+                        frame[1].count = frame[2] - 1
+
+                elif kind == F_POSSESSIVE:
+                    (_, oppc, saved_repeat, count, _, aptr, lastmark, lastindex,
+                     saved, toplevel, phase) = frame
+                    if ret:
+                        ptr = rptr
                         count += 1
-                    else:
-                        self.ptr = ptr
-                        self.repeat = saved_repeat
-                        return False
-                ptr = -1
-                while (count < rmax or rmax == MAXREPEAT) and self.ptr != ptr:
-                    lastmark = self.lastmark
-                    lastindex = self.lastindex
-                    saved = self.mark[:lastmark + 1] if lastmark >= 0 else None
-                    ptr = self.ptr
-                    if self._match(pc + 3, False):
-                        count += 1
-                    else:
+                        if count < code[oppc + 1]:
+                            push((F_POSSESSIVE, oppc, saved_repeat, count, 0, ptr,
+                                  0, 0, None, toplevel, 1))
+                            pc = oppc + 3
+                            toplevel = False
+                            break
+                        rmax = code[oppc + 2]
+                        if ((count < rmax or rmax == MAXREPEAT) and
+                                ptr != (aptr if phase == 2 else -1)):
+                            lastmark = self.lastmark
+                            saved = (self.mark[:lastmark + 1]
+                                     if lastmark >= 0 else None)
+                            push((F_POSSESSIVE, oppc, saved_repeat, count, 0, ptr,
+                                  lastmark, self.lastindex, saved, toplevel, 2))
+                            pc = oppc + 3
+                            toplevel = False
+                            break
+                    elif phase == 2:
+                        # an optional item failed: keep what matched so far
                         if saved is not None:
                             self.mark[:lastmark + 1] = saved
                         self.lastmark = lastmark
                         self.lastindex = lastindex
-                        self.ptr = ptr
-                        break
-                self.repeat = saved_repeat
-                pc += code[pc] + 1
-                ptr = self.ptr
-
-            elif op == ATOMIC_GROUP:
-                # <ATOMIC_GROUP> <skip> pattern <SUCCESS> tail
-                self.ptr = ptr
-                if not self._match(pc + 1, False):
-                    self.ptr = ptr
-                    return False
-                pc += code[pc]
-                ptr = self.ptr
-
-            elif op == GROUPREF:
-                ptr = self._groupref(pc, ptr, None)
-                if ptr < 0:
-                    return False
-                pc += 1
-
-            elif op == GROUPREF_IGNORE:
-                ptr = self._groupref(pc, ptr, _lower_ascii)
-                if ptr < 0:
-                    return False
-                pc += 1
-
-            elif op == GROUPREF_UNI_IGNORE:
-                ptr = self._groupref(pc, ptr, _lower_unicode)
-                if ptr < 0:
-                    return False
-                pc += 1
-
-            elif op == GROUPREF_LOC_IGNORE:
-                ptr = self._groupref(pc, ptr, _lower_locale)
-                if ptr < 0:
-                    return False
-                pc += 1
-
-            elif op == GROUPREF_EXISTS:
-                # <GROUPREF_EXISTS> <group> <skip> codeyes <JUMP> codeno ...
-                groupref = code[pc] * 2
-                if groupref >= self.lastmark:
-                    pc += code[pc + 1]
-                else:
-                    p = self.mark[groupref]
-                    e = self.mark[groupref + 1]
-                    if p is None or e is None or e < p:
-                        pc += code[pc + 1]
+                        ptr = aptr
                     else:
-                        pc += 2
+                        self.repeat = saved_repeat
+                        continue
+                    self.repeat = saved_repeat
+                    pc = oppc + code[oppc] + 1
+                    ret = False
+                    break
 
-            elif op == ASSERT:
-                # <ASSERT> <skip> <back> <pattern>
-                back = code[pc + 1]
-                if ptr < back:
-                    return False
-                self.ptr = ptr - back
-                if not self._match(pc + 2, False):
-                    return False
-                pc += code[pc]
+                elif kind == F_ATOMIC:
+                    if not ret:
+                        continue
+                    _, oppc, toplevel = frame
+                    ptr = rptr
+                    pc = oppc + code[oppc]
+                    ret = False
+                    break
 
-            elif op == ASSERT_NOT:
-                back = code[pc + 1]
-                if ptr >= back:
-                    self.ptr = ptr - back
-                    lastmark = self.lastmark
-                    lastindex = self.lastindex
-                    saved = self.mark[:lastmark + 1] if lastmark >= 0 else None
-                    if self._match(pc + 2, False):
-                        return False
+                elif kind == F_ASSERT:
+                    if not ret:
+                        continue
+                    _, oppc, ptr, toplevel = frame
+                    pc = oppc + code[oppc]
+                    ret = False
+                    break
+
+                elif kind == F_ASSERT_NOT:
+                    if ret:
+                        ret = False
+                        continue
+                    _, oppc, ptr, lastmark, lastindex, saved, toplevel = frame
                     if saved is not None:
                         self.mark[:lastmark + 1] = saved
                     self.lastmark = lastmark
                     self.lastindex = lastindex
-                pc += code[pc]
-
-            elif op == FAILURE:
-                return False
-
-            else:
-                raise RuntimeError("internal error in regular expression engine")
+                    pc = oppc + code[oppc]
+                    break
 
     # -- entry points -----------------------------------------------------
 
