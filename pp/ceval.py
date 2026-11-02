@@ -545,11 +545,11 @@ class VirtualMachine:
             func.func_closure = tuple(closure)
         elif closure is not None:
             raise TypeError("cannot use a closure with this code object")
-        frame = Frame(code, globals, self.builtins_for(globals), locals, func=func)
+        frame = Frame(code, globals, self.builtins_for(globals), locals, None, func)
         return self.run_frame(frame)
 
     def run_class_body(self, func: Function, namespace) -> object:
-        frame = Frame(func.__code__, func.__globals__, func.__builtins__, namespace, func=func)
+        frame = Frame(func.__code__, func.__globals__, func.__builtins__, namespace, None, func)
         return self.run_frame(frame)
 
     @property
@@ -559,7 +559,7 @@ class VirtualMachine:
     def call_function(self, func: Function, args, kwargs) -> object:
         code = func.__code__
         locals = None if code.co_flags & CO_OPTIMIZED else func.__globals__
-        frame = Frame(code, func.__globals__, func.__builtins__, locals, func=func)
+        frame = Frame(code, func.__globals__, func.__builtins__, locals, None, func)
         nargs = len(args)
         if (nargs == code.co_argcount and not kwargs and not code.co_flags & 0xC
                 and not code.co_kwonlyargcount):
