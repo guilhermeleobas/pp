@@ -183,6 +183,11 @@ class PyTypeObject:
         for field in SLOT_FIELDS + STATIC_FIELDS:
             setattr(self, field, None)
 
+    def __call__(self, *args, **kwargs):
+        # Callable like a class, so that code comparing the values of two class
+        # dicts (enum._test_simple_enum) skips this one as it does methods.
+        return self.tp(*args, **kwargs)
+
     @property
     def type(self):
         return self.tp
@@ -306,9 +311,10 @@ _object_getattribute = object.__dict__["__getattribute__"]
 _tp_dictoffset = type.__dict__["__dictoffset__"].__get__
 _type_setattr = type.__setattr__
 _type_delattr = type.__delattr__
-# The name is neither a protocol member for typing.Protocol (`_abc_` prefix) nor an
-# enum member for enum._simple_enum, which copies a class dict (sunder name).
-_VIEW_KEY = "_abc_pp_view_"
+# A dunder name, which the stdlib's loops over a class dict skip (_colorize) or copy
+# harmlessly (enum._simple_enum). typing.Protocol would take it for a member of the
+# protocol, so classes with Protocol in their MRO keep their table in `_views`.
+_VIEW_KEY = "__pp_view__"
 _MUTABLE_HEAP = Py_TPFLAGS_HEAPTYPE | Py_TPFLAGS_IMMUTABLETYPE
 
 
@@ -350,7 +356,7 @@ def _own_view(tp):
 
 def _new_view(tp) -> PyTypeObject:
     view = PyTypeObject(tp)
-    if view.tp_flags & _MUTABLE_HEAP == Py_TPFLAGS_HEAPTYPE:
+    if view.tp_flags & _MUTABLE_HEAP == Py_TPFLAGS_HEAPTYPE and not _has_protocol(tp):
         try:
             _type_setattr(tp, _VIEW_KEY, view)
         except (TypeError, AttributeError):
@@ -363,6 +369,13 @@ def _new_view(tp) -> PyTypeObject:
     if host is not None:
         view.tp_has_sequence = host[0]
     return view
+
+
+def _has_protocol(tp) -> bool:
+    for base in _tp_mro(tp):
+        if _tp_name_attr(base) == "Protocol" and _tp_module(base) == "typing":
+            return True
+    return False
 
 
 def _find_dict_kind(tp, view) -> int:
