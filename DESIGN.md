@@ -34,7 +34,7 @@ Rules for code under `pp/`:
 
 - Must not import `dis` (it is the test oracle, not a dependency).
 - May import only: `sys`, `types`, `builtins`, `opcode` (data tables only),
-  `dataclasses`, `enum`, `typing`, `io`, `argparse`, `os`. Ask before adding to
+  `dataclasses`, `enum`, `typing`, `io`, `argparse`, `os`, `_imp` (importer only). Ask before adding to
   this list.
 - No C extensions, no `ctypes`.
 
