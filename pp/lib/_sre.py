@@ -11,10 +11,8 @@ Limitations (also in BLOCKERS.md):
 * Speed: an interpreter inside an interpreter. Only the INFO block's literal
   prefix / charset search shortcuts and minimum length are used; everything
   else is a plain opcode loop.
-* Recursion: where C keeps an explicit heap stack, each backtracking point
-  here is a Python call, so a pattern that needs more nested backtrack
-  points than the interpreter's recursion limit (e.g. `(?:a|b)*` over a very
-  long string) raises RecursionError instead of matching.
+* Backtracking uses an explicit frame stack (as sre_lib.h does), so match
+  depth is bounded by memory, not the interpreter's recursion limit.
 * No code validation: `compile()` trusts the opcode list (C runs `_validate`
   and raises RuntimeError("invalid SRE code")). Malformed lists may raise
   IndexError or loop instead.
