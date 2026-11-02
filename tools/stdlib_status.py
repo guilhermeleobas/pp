@@ -27,7 +27,7 @@ TIMEOUT = 600
 # plan to support them in). Tiers follow what `unittest` needs to run under pp.
 TIERS = {
     1: ["operator", "keyword", "types", "functools", "collections", "heapq", "reprlib", "copyreg", "itertools"],
-    2: ["enum", "contextlib", "warnings", "weakref", "abc", "string", "textwrap", "fnmatch"],
+    2: ["enum", "contextlib", "warnings", "weakref", "abc", "string", "textwrap", "fnmatch", "re"],
     3: ["traceback", "difflib", "pprint", "argparse", "unittest"],
     4: ["bisect", "colorsys", "copy", "dataclasses", "graphlib", "json", "fractions", "statistics", "shlex",
         "glob", "posixpath", "tomllib", "base64", "html", "csv", "ipaddress", "random", "typing", "decimal",
