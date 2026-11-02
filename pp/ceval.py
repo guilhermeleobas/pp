@@ -1489,17 +1489,30 @@ class VirtualMachine:
         owner = f.stack.pop()
         v = f.stack.pop()
         name = f.code.co_names[i.arg]
-        view = _views_get(id(type(owner))) or Py_TYPE(owner)
-        if view.tp_setattro is _GenericSetAttr and view.tp_getattro is _GenericGetAttr \
-                and view.tp_dictkind == DICT_STD:
-            # PyObject_GenericSetAttr for a plain instance: no descriptor in the way
-            # (the method-cache probe of _PyType_Lookup done here).
+        tp = type(owner)
+        view = _views_get(id(tp)) or Py_TYPE(owner)
+        if view.tp_setattro is _GenericSetAttr:
+            # PyObject_GenericSetAttr (an instance: a type's setattro is not the
+            # generic one, so no update_slot), the method-cache probe of
+            # _PyType_Lookup done here.
             descr = view.tp_cache.get(name, _MISSING)
-            if descr is _MISSING:
-                descr = _PyType_Lookup(type(owner), name)
+            if type(descr) is _OwnRef:
+                descr = descr()
+                if descr is None:
+                    descr = _PyType_Lookup(tp, name)
+            elif descr is _MISSING:
+                descr = _PyType_Lookup(tp, name)
             if descr is NULL:
-                _dict_setitem(owner.__dict__, name, v)
-                return
+                if view.tp_dictkind == DICT_STD and view.tp_getattro is _GenericGetAttr:
+                    # A plain instance: no descriptor in the way.
+                    _dict_setitem(owner.__dict__, name, v)
+                    return
+            else:
+                # A data descriptor (a __slots__ member, a property, ...) sets it.
+                fset = (_views_get(id(type(descr))) or Py_TYPE(descr)).tp_descr_set
+                if fset is not None:
+                    fset(descr, owner, v)
+                    return
         PyObject_SetAttr(owner, name, v)
 
     def DELETE_ATTR(self, f, i):
