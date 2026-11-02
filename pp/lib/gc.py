@@ -9,8 +9,8 @@ no-op or empty answer:
     invoked and ``garbage`` stays empty;
   * ``get_objects()``, ``get_referrers()`` and ``get_referents()`` return
     empty lists; ``is_tracked()`` is False and ``is_finalized()`` is False;
-  * ``get_count()`` is ``(0, 0, 0)`` and ``get_stats()`` reports zeroed
-    generations;
+  * ``get_count()`` is ``(0, 0, 0)``; ``get_stats()`` counts the ``collect()``
+    calls per generation and reports nothing collected;
   * enable/disable, thresholds, debug flags and the freeze count are stored
     and reported back but change nothing.
 """
@@ -28,6 +28,7 @@ _enabled = True
 _debug = 0
 _threshold = (2000, 10, 10)
 _freeze_count = 0
+_collections = [0, 0, 0]
 
 
 def _int(value, name):
@@ -62,6 +63,8 @@ def collect(generation=2):
     generation = _int(generation, "generation")
     if not 0 <= generation <= 2:
         raise ValueError("invalid generation")
+    for g in range(generation + 1):
+        _collections[g] += 1
     return 0
 
 
@@ -107,8 +110,8 @@ def get_objects(generation=None):
 
 def get_stats():
     """Return a list of dictionaries containing per-generation statistics."""
-    return [{"collections": 0, "collected": 0, "uncollectable": 0}
-            for _ in range(3)]
+    return [{"collections": n, "collected": 0, "uncollectable": 0}
+            for n in _collections]
 
 
 def is_tracked(obj, /):
