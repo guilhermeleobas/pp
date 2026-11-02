@@ -8,6 +8,7 @@
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -22,8 +23,19 @@ TEMPLATE = os.path.join(ROOT, "tools", "dashboard_template.html")
 DASHBOARD = os.path.join(ROOT, "docs", "dashboard.html")
 TIMEOUT = 120
 
-# Modules tracked by STATUS.md and the dashboard. Add a module name here as it becomes supported.
-TRACKED = []
+# Modules tracked by STATUS.md and the dashboard, mapped to their tier (the order we
+# plan to support them in). Tiers follow what `unittest` needs to run under pp.
+TIERS = {
+    1: ["operator", "keyword", "types", "functools", "collections", "heapq", "reprlib", "copyreg", "itertools"],
+    2: ["enum", "contextlib", "warnings", "weakref", "abc", "string", "textwrap", "fnmatch"],
+    3: ["traceback", "difflib", "pprint", "argparse", "unittest"],
+}
+TRACKED = {m: t for t, mods in TIERS.items() for m in mods}
+
+# Modules we do not plan to support fully: what is out of scope and why. Shown next to
+# the module's test counts, so "partial" there is expected rather than a regression.
+# Example: SCOPE_NOTES = {"weakref": "GC-timing tests depend on host refcounting"}
+SCOPE_NOTES = {}
 
 # Modules whose pure-Python twin lives under a different name.
 PY_TWINS = {"decimal": "_pydecimal", "io": "_pyio", "datetime": "_pydatetime"}
@@ -82,19 +94,39 @@ def run_test(row):
     except subprocess.TimeoutExpired:
         return {"result": "timeout", "detail": f">{TIMEOUT}s"}
     out = proc.stdout + proc.stderr
-    if proc.returncode == 0:
-        return {"result": "pass", "detail": ""}
+    passed, total = unittest_counts(out)
+    counts = {"passed": passed, "total": total}
     last = next((l for l in reversed(out.strip().splitlines()) if l.strip()), "")
+    if total:
+        if passed == total and proc.returncode == 0:
+            return {"result": "pass", "detail": "", **counts}
+        return {"result": "partial" if passed else "fail", "detail": last[:120], **counts}
+    if proc.returncode == 0:
+        return {"result": "pass", "detail": "no unittest summary", **counts}
     if "UnimplementedOpcode" in last:
-        return {"result": "blocked", "detail": last.split(":", 1)[-1].strip()}
-    return {"result": "fail", "detail": last[:120]}
+        return {"result": "blocked", "detail": last.split(":", 1)[-1].strip(), **counts}
+    return {"result": "fail", "detail": last[:120], **counts}
+
+
+def unittest_counts(out):
+    """(passed, total) from unittest's "Ran N tests" / "FAILED (failures=a, errors=b, skipped=c)" summary."""
+    m = re.search(r"^Ran (\d+) tests?", out, re.M)
+    if not m:
+        return 0, 0
+    total = int(m.group(1))
+    bad = sum(int(n) for k, n in re.findall(r"\b(failures|errors|skipped|unexpected successes)=(\d+)", out)
+              if k != "expected failures")
+    return max(total - bad, 0), total
 
 
 def write_status(rows, results):
     counts = {}
     for r in rows:
         res = results.get(r["module"], {}).get("result", "untested" if r["test"] else "no test")
-        r["result"], r["detail"] = res, results.get(r["module"], {}).get("detail", "")
+        got = results.get(r["module"], {})
+        r["result"], r["detail"] = res, got.get("detail", "")
+        r["passed"], r["total"] = got.get("passed", 0), got.get("total", 0)
+        r["note"] = SCOPE_NOTES.get(r["module"], "")
         counts[res] = counts.get(res, 0) + 1
     kinds = {}
     for r in rows:
@@ -136,9 +168,9 @@ def write_status(rows, results):
         lines += ["## Top blockers", "", "| Missing | Modules blocked |", "|---|---|"]
         lines += [f"| `{k}` | {v} |" for k, v in sorted(blockers.items(), key=lambda kv: -kv[1])[:15]]
         lines.append("")
-    lines += ["## Modules", "", "| Module | Kind | CPython test | Result | Detail |", "|---|---|---|---|---|"]
+    lines += ["## Modules", "", "| Tier | Module | Kind | CPython test | Result | Tests passed | Out of scope | Detail |", "|---|---|---|---|---|---|---|---|"]
     for r in rows:
-        lines.append(f"| {r['module']} | {r['kind']} | {r['test'] or '—'} | {r['result']} | {r['detail'].replace('|', '/')} |")
+        lines.append(f"| {r['tier']} | {r['module']} | {r['kind']} | {r['test'] or '—'} | {r['result']} | {f"{r['passed']}/{r['total']}" if r['total'] else '—'} | {r['note']} | {r['detail'].replace('|', '/')} |")
     with open(STATUS, "w") as f:
         f.write("\n".join(lines) + "\n")
     write_dashboard(rows, counts, kinds, blockers)
@@ -169,7 +201,8 @@ def main():
     args = ap.parse_args()
     if not os.path.isdir(LIB):
         sys.exit("CPython Lib missing: run `pixi run fetch-cpython`")
-    rows = [r for r in classify() if r["module"] in TRACKED]
+    rows = sorted((dict(r, tier=TRACKED[r["module"]]) for r in classify() if r["module"] in TRACKED),
+                  key=lambda r: (r["tier"], list(TRACKED).index(r["module"])))
     results = json.load(open(RESULTS)) if os.path.exists(RESULTS) else {}
     if args.run:
         todo = [r for r in rows if r["test"] and (not args.modules or r["module"] in args.modules)]

@@ -1,0 +1,134 @@
+{
+ "abc": {
+  "detail": "opcode IMPORT_NAME is not implemented",
+  "passed": 0,
+  "result": "blocked",
+  "total": 0
+ },
+ "argparse": {
+  "detail": "opcode IMPORT_NAME is not implemented",
+  "passed": 0,
+  "result": "blocked",
+  "total": 0
+ },
+ "collections": {
+  "detail": "opcode IMPORT_NAME is not implemented",
+  "passed": 0,
+  "result": "blocked",
+  "total": 0
+ },
+ "contextlib": {
+  "detail": "opcode IMPORT_NAME is not implemented",
+  "passed": 0,
+  "result": "blocked",
+  "total": 0
+ },
+ "copyreg": {
+  "detail": "opcode IMPORT_NAME is not implemented",
+  "passed": 0,
+  "result": "blocked",
+  "total": 0
+ },
+ "difflib": {
+  "detail": "opcode IMPORT_NAME is not implemented",
+  "passed": 0,
+  "result": "blocked",
+  "total": 0
+ },
+ "enum": {
+  "detail": "opcode IMPORT_NAME is not implemented",
+  "passed": 0,
+  "result": "blocked",
+  "total": 0
+ },
+ "fnmatch": {
+  "detail": "opcode IMPORT_NAME is not implemented",
+  "passed": 0,
+  "result": "blocked",
+  "total": 0
+ },
+ "functools": {
+  "detail": "opcode IMPORT_NAME is not implemented",
+  "passed": 0,
+  "result": "blocked",
+  "total": 0
+ },
+ "heapq": {
+  "detail": "opcode IMPORT_NAME is not implemented",
+  "passed": 0,
+  "result": "blocked",
+  "total": 0
+ },
+ "itertools": {
+  "detail": "opcode IMPORT_NAME is not implemented",
+  "passed": 0,
+  "result": "blocked",
+  "total": 0
+ },
+ "keyword": {
+  "detail": "opcode IMPORT_NAME is not implemented",
+  "passed": 0,
+  "result": "blocked",
+  "total": 0
+ },
+ "operator": {
+  "detail": "opcode IMPORT_NAME is not implemented",
+  "passed": 0,
+  "result": "blocked",
+  "total": 0
+ },
+ "pprint": {
+  "detail": "opcode IMPORT_NAME is not implemented",
+  "passed": 0,
+  "result": "blocked",
+  "total": 0
+ },
+ "reprlib": {
+  "detail": "opcode IMPORT_NAME is not implemented",
+  "passed": 0,
+  "result": "blocked",
+  "total": 0
+ },
+ "string": {
+  "detail": "opcode IMPORT_NAME is not implemented",
+  "passed": 0,
+  "result": "blocked",
+  "total": 0
+ },
+ "textwrap": {
+  "detail": "opcode IMPORT_NAME is not implemented",
+  "passed": 0,
+  "result": "blocked",
+  "total": 0
+ },
+ "traceback": {
+  "detail": "opcode IMPORT_NAME is not implemented",
+  "passed": 0,
+  "result": "blocked",
+  "total": 0
+ },
+ "types": {
+  "detail": "opcode IMPORT_NAME is not implemented",
+  "passed": 0,
+  "result": "blocked",
+  "total": 0
+ },
+ "unittest": {
+  "detail": "opcode IMPORT_NAME is not implemented",
+  "passed": 0,
+  "result": "blocked",
+  "total": 0
+ },
+ "warnings": {
+  "detail": "opcode IMPORT_NAME is not implemented",
+  "passed": 0,
+  "result": "blocked",
+  "total": 0
+ },
+ "weakref": {
+  "detail": "opcode IMPORT_NAME is not implemented",
+  "passed": 0,
+  "result": "blocked",
+  "total": 0
+ }
+}
