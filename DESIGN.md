@@ -60,6 +60,18 @@ Rules for code under `pp/`:
   this list.
 - No C extensions, no `ctypes`.
 
+C modules: reimplement, don't borrow. Every C module the guest imports gets a
+pure-Python replacement in `pp/lib/` (`_sre`, `array`, `_weakref`, `gc`,
+`_warnings`, `math`, `_struct`, ...), even when that means documented
+limitations (for example, weak references that never die while values are host
+objects, `gc.collect()` that frees nothing). Each limitation goes in the
+module's docstring and in `BLOCKERS.md`. Only what Python cannot express stays
+on the host: the compiler (`compile()`, `_ast`, `_tokenize`), OS access
+(`posix`, `_io`, `time`, `_signal`, `_socket`, ...) and the object model of
+host values. The VM's own internals follow CPython's design rather than host
+helpers (e.g. the type attribute cache is a fixed-size table keyed by
+`tp_version_tag`, as in `typeobject.c`, so it needs no weak references).
+
 ## Package layout and API contract
 
 ```
