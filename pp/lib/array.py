@@ -321,7 +321,23 @@ def _tp_name(obj):
     return type(obj).__name__
 
 
-class array:
+class _ImmutableMeta(type):
+    """array.array is an immutable type in CPython (its subclasses are not)."""
+
+    def __setattr__(cls, name, value):
+        if cls.__dict__.get("_immutable"):
+            raise TypeError(f"cannot set '{name}' attribute of immutable type "
+                            f"'{cls.__module__}.{cls.__qualname__}'")
+        type.__setattr__(cls, name, value)
+
+    def __delattr__(cls, name):
+        if cls.__dict__.get("_immutable"):
+            raise TypeError(f"cannot delete '{name}' attribute of immutable type "
+                            f"'{cls.__module__}.{cls.__qualname__}'")
+        type.__delattr__(cls, name)
+
+
+class array(metaclass=_ImmutableMeta):
     """array(typecode [, initializer]) -> array
 
 Return a new array whose items are restricted by typecode, and
@@ -354,6 +370,7 @@ The following type codes are defined:
 """
 
     __slots__ = ("_b", "_d", "__weakref__")
+    _immutable = True
 
     def __new__(cls, typecode, initializer=_MISSING, /, **kwds):
         if kwds and cls.__init__ is array.__init__:
@@ -368,7 +385,7 @@ The following type codes are defined:
         if typecode == "u":
             import warnings
             warnings.warn("The 'u' type code is deprecated and will be "
-                          "removed in Python 3.16", DeprecationWarning, 2)
+                          "removed in Python 3.16", DeprecationWarning, 1)
         desc = _BY_CODE.get(typecode)
         if desc is None:
             raise ValueError("bad typecode (must be b, B, u, w, h, H, i, I, "
@@ -472,7 +489,11 @@ The following type codes are defined:
             i += n
         if i < 0 or i >= n:
             raise IndexError("array assignment index out of range")
-        self._b[i * isz:(i + 1) * isz] = d.enc(v)
+        data = d.enc(v)
+        # the value's __index__/__float__ may have shrunk the array
+        if i >= len(self._b) // isz:
+            raise IndexError("array assignment index out of range")
+        self._b[i * isz:(i + 1) * isz] = data
 
     def _setslice(self, s, value):
         d = self._d
@@ -529,7 +550,7 @@ The following type codes are defined:
         del self._b[i * isz:(i + 1) * isz]
 
     def __iter__(self):
-        return arrayiterator(self, 0)
+        return _make_iter(self, 0)
 
     def __contains__(self, v):
         for x in self.tolist():
@@ -645,6 +666,10 @@ followed by imaginary part) is preserved."""
         orig = bytes(buf)
         for k in range(c):
             buf[k::c] = orig[c - 1 - k::c]
+
+    def clear(self):
+        """Remove all items from the array."""
+        del self._b[:]
 
     def count(self, v, /):
         """Return number of occurrences of v in the array."""
@@ -876,9 +901,8 @@ ArrayType = array
 class arrayiterator:
     __slots__ = ("_a", "_i")
 
-    def __init__(self, a, index):
-        self._a = a
-        self._i = index
+    def __new__(cls, *args, **kwargs):
+        raise TypeError("cannot create 'array.arrayiterator' instances")
 
     def __iter__(self):
         return self
@@ -913,8 +937,14 @@ class arrayiterator:
         return 0 if a is None else max(len(a) - self._i, 0)
 
 
+def _make_iter(a, index):
+    it = object.__new__(arrayiterator)
+    it._a = a
+    it._i = index
+    return it
+
+
 arrayiterator.__module__ = "array"
-array.__module__ = "array"
 
 
 def _array_reconstructor(arraytype, typecode, mformat_code, items, /):
