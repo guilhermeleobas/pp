@@ -36,3 +36,13 @@ same branch · `REJECT`: branch dropped, task re-briefed (possibly on Opus).
   below the baseline in `main`'s `STATUS.md`.
 - Gate reports the per-module table (baseline → branch) and any drop with the
   regressed test names.
+
+## Remote and machines
+
+- GitHub: `guilhermeleobas/pp` (private). Development is local; no pull
+  requests. The orchestrator pushes `main` from time to time (after merges).
+  Agent branches stay local unless a remote session needs them.
+- Extra capacity: the `build machine` SSH host runs separate Claude sessions with a
+  clone at `~/git/pp`. Use it for CPU-heavy gate runs and independent tasks.
+  Remote sessions push their branch (`impl/<task>`, `test/<task>`) to GitHub;
+  the orchestrator fetches and merges it like a local branch.

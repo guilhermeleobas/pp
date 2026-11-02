@@ -1233,7 +1233,9 @@ class VirtualMachine:
         super_type = self.builtins.get("super")
         if global_super is super_type and PyType_Check(cls):
             # The specialized LOAD_SUPER_ATTR_ATTR / _METHOD: _PySuper_Lookup.
-            attr, method = _PySuper_Lookup(cls, self_, name, super_type, i.arg & 1)
+            attr, method = _PySuper_Lookup(
+        cls, self_, name, super_type,
+        (i.arg & 1) and Py_TYPE(self_).tp_getattro is _obj.PyObject_GenericGetAttr)
         else:
             sup = _call.PyObject_Vectorcall(global_super, (cls, self_) if i.arg & 2 else ())
             attr = PyObject_GetAttr(sup, name)
