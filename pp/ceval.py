@@ -53,6 +53,8 @@ _BuiltinFunction = types.BuiltinFunctionType
 _MethodType = types.MethodType
 _views_get = _typeobject._views_get
 _OwnRef = _typeobject._OwnRef
+_Marker = _typeobject._Marker
+_MISS = _typeobject._MISS
 _slot_tp_iternext = _typeobject.slot_tp_iternext
 
 _next = next
@@ -1459,13 +1461,13 @@ class VirtualMachine:
         view = _views_get(id(tp)) or Py_TYPE(owner)
         if view.tp_getattro is _GenericGetAttr:
             # _PyType_Lookup, its method-cache probe done here.
-            descr = view.tp_cache.get(name, _MISSING)
+            descr = view.tp_cache.get(name, _MISS)
             if type(descr) is _OwnRef:
                 descr = descr()
                 if descr is None:
-                    descr = _PyType_Lookup(tp, name)
-            elif descr is _MISSING:
-                descr = _PyType_Lookup(tp, name)
+                    descr = _PyType_Lookup(tp, name, view)
+            elif type(descr) is _Marker:
+                descr = _PyType_Lookup(tp, name, view)
             if i.arg & 1:
                 # Method form: (unbound method, self) if the attribute is a method, else
                 # (attr, NULL). _PyObject_GetMethod for the common case: a plain function
@@ -1505,13 +1507,13 @@ class VirtualMachine:
             # PyObject_GenericSetAttr (an instance: a type's setattro is not the
             # generic one, so no update_slot), the method-cache probe of
             # _PyType_Lookup done here.
-            descr = view.tp_cache.get(name, _MISSING)
+            descr = view.tp_cache.get(name, _MISS)
             if type(descr) is _OwnRef:
                 descr = descr()
                 if descr is None:
-                    descr = _PyType_Lookup(tp, name)
-            elif descr is _MISSING:
-                descr = _PyType_Lookup(tp, name)
+                    descr = _PyType_Lookup(tp, name, view)
+            elif type(descr) is _Marker:
+                descr = _PyType_Lookup(tp, name, view)
             if descr is NULL:
                 if view.tp_dictkind == DICT_STD and view.tp_getattro is _GenericGetAttr:
                     # A plain instance: no descriptor in the way.

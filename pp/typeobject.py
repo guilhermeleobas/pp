@@ -431,14 +431,26 @@ def PyType_IsSubtype(a, b) -> bool:
 # (tp_version_tag, name); here each slot table keeps its own dict, name -> result,
 # emptied whenever the version tag changes (and gone with the table when the type
 # is modified or dies). It does not own the type: what the lookup found in the
-# type's own dict is stored only as a weak reference (a method using `__class__`
-# would keep its class alive), and only for functions; what a base provides, or
+# type's own dict is stored as a weak reference when it is a function, and
+# otherwise only as the fact that it is there (_IN_OWN_DICT: a `__slots__`
+# member's descriptor, for one, refers to its class); what a base provides, or
 # that nothing was found, is stored as is.
-_MISS = object()
+class _Marker:
+    __slots__ = ("name",)
+
+    def __init__(self, name):
+        self.name = name
+
+    def __repr__(self):
+        return f"<{self.name}>"
+
+
+_MISS = _Marker("not in the method cache")
+_IN_OWN_DICT = _Marker("in the type's own dict")
 
 
 class _OwnRef(_ref):
-    """A method-cache entry for something found in the type's own dict."""
+    """A method-cache entry for a function found in the type's own dict."""
     __slots__ = ()
 
 
@@ -450,17 +462,24 @@ def register_function_type(tp) -> None:
     _OWN_CACHEABLE.add(tp)
 
 
-def _PyType_Lookup(tp, name):
-    """MRO lookup in the host type `tp`. Returns NULL if absent."""
-    view = _views_get(id(tp)) or _new_view(tp)
+def _PyType_Lookup(tp, name, view=None):
+    """MRO lookup in the host type `tp` (`view`: its slot table, if at hand).
+    Returns NULL if absent."""
+    if view is None:
+        view = _views_get(id(tp)) or _new_view(tp)
     if type(name) is str:
         cache = view.tp_cache
         res = cache.get(name, _MISS)
         if res is not _MISS:
-            if type(res) is not _OwnRef:
-                return res
-            res = res()
-            if res is not None:
+            if type(res) is _OwnRef:
+                res = res()
+                if res is not None:
+                    return res
+            elif res is _IN_OWN_DICT:
+                res = _type_dictget(_tp_dict(tp), name, NULL)
+                if res is not NULL:
+                    return res
+            else:
                 return res
     else:
         cache = None
@@ -473,6 +492,8 @@ def _PyType_Lookup(tp, name):
                     cache[name] = res
                 elif type(res) in _OWN_CACHEABLE:
                     cache[name] = _OwnRef(res)
+                else:
+                    cache[name] = _IN_OWN_DICT
             return res
         depth += 1
     if cache is not None:
