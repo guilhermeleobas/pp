@@ -122,7 +122,9 @@ def test_run_source_returns_globals():
     assert isinstance(g, dict)
     assert g["a"] == 1 and g["b"] == 42 and g["c"] == [1, 42]
     assert g["__name__"] == "__main__"
-    assert g["__builtins__"] is builtins
+    b = g["__builtins__"]
+    assert isinstance(b, types.ModuleType) and b is not builtins
+    assert all(hasattr(b, n) for n in ("len", "print", "range", "Exception", "__import__"))
 
 
 def test_run_source_custom_globals():
