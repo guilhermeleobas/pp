@@ -4,7 +4,7 @@ Where pp stands and what comes next. Per-module numbers are in
 [STATUS.md](STATUS.md); blockers and the ranked to-do list are in
 [BLOCKERS.md](BLOCKERS.md); the process is in [WORKFLOW.md](WORKFLOW.md).
 
-Work is paused as of 2026-11-02. Branches below are pushed to GitHub.
+Branches below are pushed to GitHub.
 
 ## Done (on `main`)
 
@@ -23,10 +23,10 @@ Work is paused as of 2026-11-02. Branches below are pushed to GitHub.
 
 | Branch | What | Review | Gate | Next step |
 |---|---|---|---|---|
-| `impl/m3-fixes` | Milestone 3 regression fixes; CPython-style version-tag type cache; no new host imports; warnings go through the guest `warnings` | round 1: fix (all items addressed in round 2) | round 2: no drops except `difflib` timeout (perf) | re-review round 2, judge, merge |
-| `impl/collections` | Pure-Python `_collections` (deque, defaultdict, OrderedDict, views) | round 1: fix (all items addressed) | round 2: `pprint` back to 77/77 | re-review, judge, merge |
-| `impl/sre` | Pure-Python `_sre` regex engine (`re` fully in Python) | merge, with a limit: `RecursionError` on group repeats over ~600 chars | clean vs `main` | judge; then explicit-stack matcher (see below) |
-| `impl/array-weakref` | Pure-Python `array`, `_weakref`, `gc` | round 1: fix (registry, array speed, error messages; addressed in round 2) | weakref/object-death drops (accepted) | re-review round 2, judge, merge |
+| `impl/m3-fixes` | Milestone 3 regression fixes; CPython-style version-tag type cache; no new host imports; warnings go through the guest `warnings` | round 2: fix (guest-visible slot table, `__dict__` property regression, Protocol class leak) | round 2: no drops except `difflib` timeout (perf) | fix round 3 |
+| `impl/collections` | Pure-Python `_collections` (deque, defaultdict, OrderedDict, views) | round 2: fix (OrderedDict instance dict, mutation during iteration) | round 2: `pprint` back to 77/77 | fix round 3 |
+| `impl/sre` | Pure-Python `_sre` regex engine (`re` fully in Python) | merge, with a limit: `RecursionError` on group repeats over ~600 chars | clean vs `main` | rebase after the two above (conflicts); explicit-stack matcher on `impl/sre-stack` |
+| `impl/array-weakref` | Pure-Python `array`, `_weakref`, `gc` | round 2: fix (rebase, subclass return types, `array.array` name) | weakref/object-death drops (accepted) | fix round 3 |
 
 Merge order: `impl/m3-fixes` → `impl/collections` → `impl/sre` →
 `impl/array-weakref`; regenerate the dashboard after each.
