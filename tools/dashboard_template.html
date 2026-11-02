@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>pp stdlib status</title>
 <style>
-:root{--bg:#fff;--fg:#1c1e21;--mut:#666d76;--card:#f4f5f7;--bd:#d9dce1;--pass:#1a7f37;--partial:#0969da;--fail:#cf222e;--blocked:#9a6700;--timeout:#bc4c00;--untested:#6e7781;--notest:#8c959f;--bar:#1a7f37;--skip:#8c959f}
-@media(prefers-color-scheme:dark){:root{--bg:#14161a;--fg:#e6e8eb;--mut:#9aa1ab;--card:#1e2127;--bd:#343a43;--pass:#3fb950;--partial:#58a6ff;--fail:#f85149;--blocked:#d29922;--timeout:#f0883e;--untested:#8b949e;--notest:#6e7681;--bar:#3fb950;--skip:#6e7681}}
+:root{--bg:#fff;--fg:#1c1e21;--mut:#666d76;--card:#f4f5f7;--bd:#d9dce1;--pass:#1a7f37;--partial:#0969da;--fail:#cf222e;--blocked:#9a6700;--timeout:#bc4c00;--untested:#6e7781;--notest:#8c959f;--bar:#1a7f37;--skip:#8c959f;--queued:#6e7781;--running:#0969da;--waiting:#9a6700;--done:#1a7f37;--failed:#cf222e}
+@media(prefers-color-scheme:dark){:root{--bg:#14161a;--fg:#e6e8eb;--mut:#9aa1ab;--card:#1e2127;--bd:#343a43;--pass:#3fb950;--partial:#58a6ff;--fail:#f85149;--blocked:#d29922;--timeout:#f0883e;--untested:#8b949e;--notest:#6e7681;--bar:#3fb950;--skip:#6e7681;--queued:#8b949e;--running:#58a6ff;--waiting:#d29922;--done:#3fb950;--failed:#f85149}}
 *{box-sizing:border-box}
 body{margin:0;padding:16px;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;max-width:1000px;margin-inline:auto}
 h1{font-size:1.4rem;margin:0}h2{font-size:1.1rem;margin:1.5rem 0 .5rem}
@@ -33,6 +33,12 @@ th.sort{cursor:pointer;user-select:none;white-space:nowrap}th.sort:focus-visible
 .legend{display:flex;flex-wrap:wrap;gap:12px;color:var(--mut);font-size:.8rem;margin-bottom:6px}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;background:var(--c)}
 .badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:.78rem;color:#fff;background:var(--c);white-space:nowrap}
+.work{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px}
+.mut{color:var(--mut);margin:0}
+.card{background:var(--card);border:1px solid var(--bd);border-left:4px solid var(--c);border-radius:8px;padding:8px 10px}
+.card small{display:block;color:var(--mut);font-size:.8rem}
+.card .top{display:flex;justify-content:space-between;gap:8px;align-items:flex-start;margin-bottom:2px}
+.card .top .badge{flex:none}
 </style>
 </head>
 <body>
@@ -40,6 +46,10 @@ th.sort{cursor:pointer;user-select:none;white-space:nowrap}th.sort:focus-visible
 <h1>pp stdlib status</h1>
 <p id="meta"></p>
 </header>
+<section>
+<h2 style="margin-top:1rem">Now in progress <span id="wupd" style="color:var(--mut);font-size:.8rem;font-weight:normal"></span></h2>
+<div class="work" id="work"></div>
+</section>
 <p id="empty" hidden>No modules tracked yet. Add names to <code>TRACKED</code> in <code>tools/stdlib_status.py</code>.</p>
 <main id="main">
 <h2>Summary</h2>
@@ -71,6 +81,21 @@ const color = r => "var(" + (COLORS[r] || "--untested") + ")";
 const el = (tag, text, cls) => { const e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; };
 
 $("meta").textContent = "Generated " + D.generated + " against CPython " + D.cpython;
+
+const W = D.work || {items: []};
+$("wupd").textContent = W.updated ? "updated " + W.updated : "";
+if (!W.items.length) $("work").append(el("p", "Nothing running", "mut"));
+for (const i of W.items) {
+  const c = el("div", null, "card"), col = "var(--" + (["queued", "running", "waiting", "done", "failed"].includes(i.status) ? i.status : "queued") + ")";
+  c.style.setProperty("--c", col);
+  const top = el("div", null, "top"), b = el("span", i.status || "?", "badge");
+  top.append(el("b", i.task || "(untitled)"), b);
+  c.append(top, el("small", [i.role, i.model, i.where].filter(Boolean).join(" · ")));
+  if (i.branch) c.append(el("small", "branch " + i.branch));
+  if (i.started) c.append(el("small", "started " + i.started));
+  if (i.note) c.append(el("small", i.note));
+  $("work").append(c);
+}
 
 if (!D.rows.length) { $("empty").hidden = false; $("main").hidden = true; }
 
