@@ -1,134 +1,130 @@
 {
  "abc": {
-  "detail": "opcode IMPORT_NAME is not implemented",
-  "passed": 0,
-  "result": "blocked",
-  "total": 0
+  "detail": "",
+  "passed": 76,
+  "result": "pass",
+  "total": 76
  },
  "argparse": {
-  "detail": "opcode IMPORT_NAME is not implemented",
-  "passed": 0,
-  "result": "blocked",
-  "total": 0
+  "detail": "FAILED (failures=4, errors=2, skipped=1)",
+  "passed": 1956,
+  "result": "partial",
+  "total": 1963
  },
  "collections": {
-  "detail": "opcode IMPORT_NAME is not implemented",
+  "detail": "E",
   "passed": 0,
-  "result": "blocked",
+  "result": "fail",
   "total": 0
  },
  "contextlib": {
-  "detail": "opcode IMPORT_NAME is not implemented",
+  "detail": "E",
   "passed": 0,
-  "result": "blocked",
+  "result": "fail",
   "total": 0
  },
  "copyreg": {
-  "detail": "opcode IMPORT_NAME is not implemented",
+  "detail": "ModuleNotFoundError: Standard library module 'resource' was not found",
   "passed": 0,
-  "result": "blocked",
+  "result": "fail",
   "total": 0
  },
  "difflib": {
-  "detail": "opcode IMPORT_NAME is not implemented",
-  "passed": 0,
-  "result": "blocked",
-  "total": 0
+  "detail": ">120s",
+  "result": "timeout"
  },
  "enum": {
-  "detail": "opcode IMPORT_NAME is not implemented",
-  "passed": 0,
-  "result": "blocked",
-  "total": 0
+  "detail": "FAILED (failures=10, errors=5, skipped=4)",
+  "passed": 1068,
+  "result": "partial",
+  "total": 1087
  },
  "fnmatch": {
-  "detail": "opcode IMPORT_NAME is not implemented",
-  "passed": 0,
-  "result": "blocked",
-  "total": 0
+  "detail": "",
+  "passed": 24,
+  "result": "pass",
+  "total": 24
  },
  "functools": {
-  "detail": "opcode IMPORT_NAME is not implemented",
+  "detail": "ModuleNotFoundError: Standard library module 'resource' was not found",
   "passed": 0,
-  "result": "blocked",
+  "result": "fail",
   "total": 0
  },
  "heapq": {
-  "detail": "opcode IMPORT_NAME is not implemented",
-  "passed": 0,
-  "result": "blocked",
-  "total": 0
+  "detail": "FAILED (failures=2, skipped=34)",
+  "passed": 33,
+  "result": "partial",
+  "total": 69
  },
  "itertools": {
-  "detail": "opcode IMPORT_NAME is not implemented",
-  "passed": 0,
-  "result": "blocked",
-  "total": 0
+  "detail": ">120s",
+  "result": "timeout"
  },
  "keyword": {
-  "detail": "opcode IMPORT_NAME is not implemented",
-  "passed": 0,
-  "result": "blocked",
-  "total": 0
+  "detail": "",
+  "passed": 11,
+  "result": "pass",
+  "total": 11
  },
  "operator": {
-  "detail": "opcode IMPORT_NAME is not implemented",
-  "passed": 0,
-  "result": "blocked",
-  "total": 0
+  "detail": "FAILED (errors=10, skipped=59)",
+  "passed": 43,
+  "result": "partial",
+  "total": 112
  },
  "pprint": {
-  "detail": "opcode IMPORT_NAME is not implemented",
-  "passed": 0,
-  "result": "blocked",
-  "total": 0
+  "detail": "",
+  "passed": 77,
+  "result": "pass",
+  "total": 77
  },
  "reprlib": {
-  "detail": "opcode IMPORT_NAME is not implemented",
-  "passed": 0,
-  "result": "blocked",
-  "total": 0
+  "detail": "FAILED (errors=1, skipped=2)",
+  "passed": 30,
+  "result": "partial",
+  "total": 33
  },
  "string": {
-  "detail": "opcode IMPORT_NAME is not implemented",
+  "detail": "no unittest summary",
   "passed": 0,
-  "result": "blocked",
+  "result": "pass",
   "total": 0
  },
  "textwrap": {
-  "detail": "opcode IMPORT_NAME is not implemented",
-  "passed": 0,
-  "result": "blocked",
-  "total": 0
+  "detail": "",
+  "passed": 68,
+  "result": "pass",
+  "total": 68
  },
  "traceback": {
-  "detail": "opcode IMPORT_NAME is not implemented",
-  "passed": 0,
-  "result": "blocked",
-  "total": 0
+  "detail": "FAILED (failures=55, errors=149, skipped=133)",
+  "passed": 104,
+  "result": "partial",
+  "total": 441
  },
  "types": {
-  "detail": "opcode IMPORT_NAME is not implemented",
+  "detail": "ModuleNotFoundError: Standard library module '_datetime' was not found",
   "passed": 0,
-  "result": "blocked",
+  "result": "fail",
   "total": 0
  },
  "unittest": {
-  "detail": "opcode IMPORT_NAME is not implemented",
+  "detail": "no unittest summary",
   "passed": 0,
-  "result": "blocked",
+  "result": "pass",
   "total": 0
  },
  "warnings": {
-  "detail": "opcode IMPORT_NAME is not implemented",
+  "detail": "ModuleNotFoundError: No module named 'test.test_warnings.data'. Did you mean: 'test.test_warnings.__init__'?",
   "passed": 0,
-  "result": "blocked",
+  "result": "fail",
   "total": 0
  },
  "weakref": {
-  "detail": "opcode IMPORT_NAME is not implemented",
-  "passed": 0,
-  "result": "blocked",
-  "total": 0
+  "detail": "FAILED (failures=8, errors=1, skipped=2)",
+  "passed": 129,
+  "result": "partial",
+  "total": 140
  }
 }

@@ -1358,11 +1358,11 @@ class VirtualMachine:
 
 def run_source(source: str, filename: str = "<string>", globals: dict | None = None,
                vm: VirtualMachine | None = None) -> dict:
-    if globals is None:
-        globals = {"__name__": "__main__", "__builtins__": _builtins}
-    code = compile_source(source, filename, "exec")
     if vm is None:
         vm = VirtualMachine()
+    if globals is None:
+        globals = _main_module(vm).__dict__
+    code = compile_source(source, filename, "exec")
     vm.run_code(code, globals)
     return globals
 
@@ -1374,5 +1374,14 @@ def run_file(path: str, vm: VirtualMachine | None = None) -> dict:
     if vm is None:
         vm = VirtualMachine()
     vm.add_path(os.path.dirname(path))
-    globals = {"__name__": "__main__", "__builtins__": _builtins, "__file__": path}
+    globals = _main_module(vm).__dict__
+    globals["__file__"] = path
     return run_source(source, path, globals, vm)
+
+
+def _main_module(vm: VirtualMachine) -> types.ModuleType:
+    """A fresh `__main__` module registered in vm.modules (unittest.main() needs it)."""
+    mod = types.ModuleType("__main__")
+    mod.__dict__["__builtins__"] = _builtins
+    vm.modules["__main__"] = mod
+    return mod

@@ -10,6 +10,7 @@ from pp.bytecode import compile_source
 
 _PP_DIR = os.path.dirname(os.path.realpath(__file__))
 PP_LIB = os.path.join(_PP_DIR, "lib")
+HOST_STDLIB = os.path.dirname(os.__file__)
 STDLIB = os.path.join(os.path.dirname(_PP_DIR), "vendor", "cpython-3.15.2", "Lib")
 
 # C modules (builtin or extension) that VM code may import from the host.
@@ -59,6 +60,9 @@ HOST_MODULES_TEMPORARY = frozenset({
     "fcntl",
     "_posixsubprocess",
     "array",
+    "_socket",       # socket (needed by test.support)
+    "faulthandler",  # needed by test.support / unittest runner
+    "resource",      # needed by test.support
 })
 
 HOST_MODULES = HOST_MODULES_PERMANENT | HOST_MODULES_TEMPORARY
@@ -273,7 +277,26 @@ class Importer:
                 return None
             return frame.globals.get("__name__")
 
+        # Audit hooks stay VM-side: a VM function installed as a host hook would
+        # be called for every host audit event, including pp's own.
+        audit_hooks = []
+
+        def addaudithook(hook):
+            audit_hooks.append(hook)
+
+        def audit(event, *args):
+            for hook in list(audit_hooks):
+                hook(event, args)
+
         ns = mod.__dict__
+        ns.update(addaudithook=addaudithook, audit=audit)
+        # conda-forge adds "| packaged by ... |" to sys.version and patches its own
+        # platform.py to parse it; the vendored platform.py cannot, so drop it.
+        version = sys.version
+        if version.count("|") >= 2:
+            head, _, rest = version.partition("|")
+            version = head.rstrip() + " " + rest.partition("|")[2].lstrip()
+        ns["version"] = version
         ns.update(__getattr__=__getattr__, exc_info=exc_info, exception=exception,
                   _getframe=_getframe, _getframemodulename=_getframemodulename,
                   modules=vm.modules, path=self.sys_path, meta_path=[VMFinder(self)], path_hooks=[],
@@ -375,7 +398,11 @@ class Importer:
 
     def _find_source(self, name, path):
         tail = name.rpartition(".")[2]
-        for directory in (self.sys_path if path is None else path):
+        dirs = self.sys_path if path is None else path
+        if path is None and name.startswith("_sysconfigdata"):
+            # Generated at host build time; lives only in the host stdlib dir.
+            dirs = list(dirs) + [HOST_STDLIB]
+        for directory in dirs:
             if not isinstance(directory, str):
                 continue
             pkg_init = os.path.join(directory, tail, "__init__.py")
@@ -391,6 +418,14 @@ class Importer:
         if filename is None:
             if path is None and name in HOST_MODULES:
                 return ModuleSpec(name, _HOST_LOADER, origin="built-in")
+            # PEP 420 namespace package: directories without __init__.py.
+            tail = name.rpartition(".")[2]
+            dirs = [os.path.join(d, tail) for d in (self.sys_path if path is None else path)
+                    if isinstance(d, str) and os.path.isdir(os.path.join(d, tail))]
+            if dirs:
+                spec = ModuleSpec(name, None)
+                spec.submodule_search_locations = dirs
+                return spec
             return None
         filename = os.path.realpath(filename)
         return ModuleSpec(name, SourceLoader(self, name, filename), origin=filename,
@@ -413,6 +448,13 @@ class Importer:
             module = _HOST_LOADER.create_module(spec)
             modules[name] = module
             return module
+        if spec.loader is None:  # namespace package
+            module = types.ModuleType(name)
+            module.__spec__ = spec
+            module.__path__ = list(spec.submodule_search_locations)
+            module.__package__ = name
+            modules[name] = module
+            return module
         module = types.ModuleType(name)
         ns = module.__dict__
         ns["__file__"] = spec.origin
@@ -433,6 +475,10 @@ class Importer:
             raise
         finally:
             spec._initializing = False
+        if name == "types" and not hasattr(module, "LazyImportType"):
+            # Lib/types.py has no pure-Python fallback for it; pp never creates
+            # lazy-import objects, so the host type is only used in isinstance checks.
+            module.LazyImportType = types.LazyImportType
         return modules[name]
 
     def _handle_fromlist(self, module, fromlist, recursive=False):

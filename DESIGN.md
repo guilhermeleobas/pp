@@ -14,8 +14,9 @@ library written entirely in Python. The structure mirrors CPython so that
 
 ## References
 
-Use these as the primary references; mirror their structure and semantics
-rather than inventing new designs:
+**CPython is the ruler.** When pp, Dynamo, or anything else disagrees with
+CPython 3.15's behavior or source, CPython wins. Dynamo is secondary prior art
+only, consulted for ideas and edge cases, never as the authority.
 
 - **CPython 3.15** (`<cpython checkout>`, branch
   `upstream/3.15`; read with `git show upstream/3.15:<path>`): `Python/bytecodes.c`
