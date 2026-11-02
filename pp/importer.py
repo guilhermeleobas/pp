@@ -26,14 +26,12 @@ HOST_MODULES_PERMANENT = frozenset({
     "builtins",     # served as the VM's own builtins module
     "_imp",
     "_thread",
-    "_weakref",
     "_io",
     "posix",
     "errno",
     "time",
     "marshal",
     "_warnings",
-    "gc",
     "_typing",      # TypeVar & co. are object-model types (also used by intrinsics)
     "_codecs",
     "_signal",
@@ -59,7 +57,6 @@ HOST_MODULES_TEMPORARY = frozenset({
     "select",
     "fcntl",
     "_posixsubprocess",
-    "array",
     "_socket",       # socket (needed by test.support)
     "faulthandler",  # needed by test.support / unittest runner
     "resource",      # needed by test.support
