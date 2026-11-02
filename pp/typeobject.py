@@ -18,6 +18,7 @@ Calling convention: C returns NULL with an exception set; here the slot
 functions raise. "Missing" is the `NULL` sentinel.
 """
 
+import gc
 import types
 import weakref
 
@@ -198,6 +199,19 @@ def _drop_view(ident, ref) -> None:
     view = _views.get(ident)
     if view is not None and view._tpref is ref:
         del _views[ident]
+
+
+def _purge_dead_views(phase, info) -> None:
+    """A finalizer running inside a collection can create the view of a type the
+    collector already cleared; its weakref callback never fires. Purge such views
+    after each collection so a later type reusing the id cannot find them."""
+    if phase == "stop":
+        for ident, view in list(_views.items()):
+            if view._tpref() is None:
+                _views.pop(ident, None)
+
+
+gc.callbacks.append(_purge_dead_views)
 
 
 def _compute_tp_name(tp, flags) -> str:
