@@ -93,8 +93,8 @@ def run_test(row):
     except subprocess.TimeoutExpired:
         return {"result": "timeout", "detail": f">{TIMEOUT}s"}
     out = proc.stdout + proc.stderr
-    passed, total = unittest_counts(out)
-    counts = {"passed": passed, "total": total}
+    counts = unittest_counts(out)
+    passed, total = counts["passed"], counts["total"]
     last = next((l for l in reversed(out.strip().splitlines()) if l.strip()), "")
     if total:
         if passed == total and proc.returncode == 0:
@@ -106,14 +106,21 @@ def run_test(row):
 
 
 def unittest_counts(out):
-    """(passed, total) from unittest's "Ran N tests" / "FAILED (failures=a, errors=b, skipped=c)" summary."""
+    """Counts from unittest's "Ran N tests" / "FAILED (failures=a, errors=b, skipped=c)" summary.
+
+    Returns passed/total plus failures/errors/skipped (unexpected successes count as failures).
+    """
     m = re.search(r"^Ran (\d+) tests?", out, re.M)
     if not m:
-        return 0, 0
+        return {"passed": 0, "total": 0, "failures": 0, "errors": 0, "skipped": 0}
     total = int(m.group(1))
-    bad = sum(int(n) for k, n in re.findall(r"\b(failures|errors|skipped|unexpected successes)=(\d+)", out)
-              if k != "expected failures")
-    return max(total - bad, 0), total
+    found = {}
+    for k, n in re.findall(r"\b(failures|errors|skipped|unexpected successes)=(\d+)", out):
+        found[k] = found.get(k, 0) + int(n)
+    failures = found.get("failures", 0) + found.get("unexpected successes", 0)
+    errors, skipped = found.get("errors", 0), found.get("skipped", 0)
+    return {"passed": max(total - failures - errors - skipped, 0), "total": total,
+            "failures": failures, "errors": errors, "skipped": skipped}
 
 
 def _host_modules():
@@ -132,6 +139,11 @@ def _host_modules():
 PERM_HOST, TEMP_HOST = _host_modules()
 
 
+def text_bar(passed, total, width=10):
+    filled = round(width * passed / total) if total else 0
+    return f"`{'█' * filled}{'░' * (width - filled)}` {int(100 * passed / total)}%"
+
+
 def write_status(rows, results):
     counts = {}
     for r in rows:
@@ -139,6 +151,9 @@ def write_status(rows, results):
         got = results.get(r["module"], {})
         r["result"], r["detail"] = res, got.get("detail", "")
         r["passed"], r["total"] = got.get("passed", 0), got.get("total", 0)
+        # Old result files lack these: None means unknown (bar shows passed/total only).
+        for k in ("failures", "errors", "skipped"):
+            r[k] = got.get(k)
         r["note"] = SCOPE_NOTES.get(r["module"], "")
         counts[res] = counts.get(res, 0) + 1
     kinds = {}
@@ -188,7 +203,7 @@ def write_status(rows, results):
         lines.append("")
     lines += ["## Modules", "", "| Tier | Module | Kind | CPython test | Result | Tests passed | Out of scope | Detail |", "|---|---|---|---|---|---|---|---|"]
     for r in rows:
-        lines.append(f"| {r['tier']} | {r['module']} | {r['kind']} | {r['test'] or '—'} | {r['result']} | {f"{r['passed']}/{r['total']}" if r['total'] else '—'} | {r['note']} | {r['detail'].replace('|', '/')} |")
+        lines.append(f"| {r['tier']} | {r['module']} | {r['kind']} | {r['test'] or '—'} | {r['result']} | {f"{text_bar(r['passed'], r['total'])} {r['passed']}/{r['total']}" if r['total'] else '—'} | {r['note']} | {r['detail'].replace('|', '/')} |")
     with open(STATUS, "w") as f:
         f.write("\n".join(lines) + "\n")
     write_dashboard(rows, counts, kinds, blockers)

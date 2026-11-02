@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>pp stdlib status</title>
 <style>
-:root{--bg:#fff;--fg:#1c1e21;--mut:#666d76;--card:#f4f5f7;--bd:#d9dce1;--pass:#1a7f37;--partial:#0969da;--fail:#cf222e;--blocked:#9a6700;--timeout:#bc4c00;--untested:#6e7781;--notest:#8c959f;--bar:#1a7f37}
-@media(prefers-color-scheme:dark){:root{--bg:#14161a;--fg:#e6e8eb;--mut:#9aa1ab;--card:#1e2127;--bd:#343a43;--pass:#3fb950;--partial:#58a6ff;--fail:#f85149;--blocked:#d29922;--timeout:#f0883e;--untested:#8b949e;--notest:#6e7681;--bar:#3fb950}}
+:root{--bg:#fff;--fg:#1c1e21;--mut:#666d76;--card:#f4f5f7;--bd:#d9dce1;--pass:#1a7f37;--partial:#0969da;--fail:#cf222e;--blocked:#9a6700;--timeout:#bc4c00;--untested:#6e7781;--notest:#8c959f;--bar:#1a7f37;--skip:#8c959f}
+@media(prefers-color-scheme:dark){:root{--bg:#14161a;--fg:#e6e8eb;--mut:#9aa1ab;--card:#1e2127;--bd:#343a43;--pass:#3fb950;--partial:#58a6ff;--fail:#f85149;--blocked:#d29922;--timeout:#f0883e;--untested:#8b949e;--notest:#6e7681;--bar:#3fb950;--skip:#6e7681}}
 *{box-sizing:border-box}
 body{margin:0;padding:16px;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;max-width:1000px;margin-inline:auto}
 h1{font-size:1.4rem;margin:0}h2{font-size:1.1rem;margin:1.5rem 0 .5rem}
@@ -25,6 +25,13 @@ input,select{padding:6px 8px;border:1px solid var(--bd);border-radius:6px;backgr
 table{border-collapse:collapse;width:100%;font-size:.9rem}
 th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--bd);vertical-align:top}
 td.d{word-break:break-word;color:var(--mut)}
+th.sort{cursor:pointer;user-select:none;white-space:nowrap}th.sort:focus-visible{outline:2px solid var(--partial)}
+.tb{display:flex;align-items:center;gap:8px;min-width:230px}
+.tb .seg{display:flex;flex:0 0 110px;height:10px;background:var(--card);border:1px solid var(--bd);border-radius:5px;overflow:hidden}
+.tb .seg i{display:block;height:100%}
+.tb span{font-size:.82rem;white-space:nowrap}
+.legend{display:flex;flex-wrap:wrap;gap:12px;color:var(--mut);font-size:.8rem;margin-bottom:6px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;background:var(--c)}
 .badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:.78rem;color:#fff;background:var(--c);white-space:nowrap}
 </style>
 </head>
@@ -48,8 +55,9 @@ td.d{word-break:break-word;color:var(--mut)}
 <select id="fr" aria-label="Result"></select>
 <select id="fk" aria-label="Kind"></select>
 </div>
+<div class="legend" id="legend"></div>
 <div class="wrap"><table>
-<thead><tr><th>Tier</th><th>Module</th><th>Kind</th><th>CPython test</th><th>Result</th><th>Tests passed</th><th>Out of scope</th><th>Detail</th></tr></thead>
+<thead><tr><th>Tier</th><th>Module</th><th>Kind</th><th>CPython test</th><th>Result</th><th class="sort" id="sortp" tabindex="0" role="columnheader" aria-sort="none" title="Sort by pass percentage">Tests passed</th><th>Out of scope</th><th>Detail</th></tr></thead>
 <tbody id="rows"></tbody>
 </table></div>
 <p id="count" style="color:var(--mut);font-size:.85rem"></p>
@@ -97,18 +105,49 @@ function fill(sel, label, values) {
 fill($("fr"), "All results", Object.keys(COLORS));
 fill($("fk"), "All kinds", Object.keys(D.kinds));
 
+const SEGS = [["passed", "--pass"], ["failures", "--fail"], ["errors", "--timeout"], ["skipped", "--skip"]];
+for (const [k, c] of SEGS) { const s = el("span", k === "failures" ? "failed" : k); s.prepend(el("i")); s.firstChild.style.setProperty("--c", "var(" + c + ")"); $("legend").append(s); }
+const known = r => SEGS.every(([k]) => typeof r[k] === "number");
+function testBar(r) {
+  const box = el("div", null, "tb"), seg = el("div", null, "seg"), lab = el("span");
+  if (r.total) {
+    const parts = known(r) ? SEGS.map(([k, c]) => [r[k], c, k]) : [[r.passed, "--pass", "passed"], [r.total - r.passed, "--skip", "not passed"]];
+    for (const [n, c, k] of parts) {
+      if (!n) continue;
+      const i = el("i"); i.style.width = (100 * n / r.total) + "%"; i.style.background = "var(" + c + ")"; i.title = n + " " + k;
+      seg.append(i);
+    }
+    lab.textContent = r.passed + " / " + r.total + " (" + (100 * r.passed / r.total).toFixed(1) + "%)";
+  } else lab.textContent = "—";
+  box.append(seg, lab);
+  return box;
+}
+// sort: 0 = table order, 1 = pass % descending, -1 = ascending; modules without counts always last
+let sortDir = 0;
+const pctOf = r => r.total ? r.passed / r.total : null;
+function cycleSort() { sortDir = sortDir === 0 ? 1 : sortDir === 1 ? -1 : 0; render(); }
+$("sortp").addEventListener("click", cycleSort);
+$("sortp").addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); cycleSort(); } });
+
 function render() {
+  $("sortp").setAttribute("aria-sort", sortDir === 0 ? "none" : sortDir === 1 ? "descending" : "ascending");
+  $("sortp").textContent = "Tests passed" + (sortDir === 1 ? " ▼" : sortDir === -1 ? " ▲" : "");
   const q = $("q").value.trim().toLowerCase(), fr = $("fr").value, fk = $("fk").value;
   const body = $("rows"); body.textContent = "";
   let n = 0;
-  for (const r of D.rows) {
+  const rows = sortDir === 0 ? D.rows : D.rows.slice().sort((a, b) => {
+    const x = pctOf(a), y = pctOf(b);
+    if (x === null || y === null) return (x === null) - (y === null);
+    return (y - x) * sortDir || b.total - a.total;
+  });
+  for (const r of rows) {
     if (fr && r.result !== fr) continue;
     if (fk && r.kind !== fk) continue;
     if (q && !(r.module + " " + r.detail).toLowerCase().includes(q)) continue;
     const tr = el("tr");
     const b = el("span", r.result, "badge"); b.style.setProperty("--c", color(r.result));
     const res = el("td"); res.append(b);
-    tr.append(el("td", String(r.tier)), el("td", r.module), el("td", r.kind), el("td", r.test || "—"), res, el("td", r.total ? r.passed + "/" + r.total : "—"), el("td", r.note, "d"), el("td", r.detail, "d"));
+    tr.append(el("td", String(r.tier)), el("td", r.module), el("td", r.kind), el("td", r.test || "—"), res, (() => { const td = el("td"); td.append(testBar(r)); return td; })(), el("td", r.note, "d"), el("td", r.detail, "d"));
     body.append(tr); n++;
   }
   $("count").textContent = n + " of " + D.rows.length + " modules";
