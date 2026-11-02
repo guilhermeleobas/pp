@@ -14,6 +14,9 @@ Branches below are pushed to GitHub.
 - Milestone 3: CPython-mirrored type slots and abstract layer
   (`typeobject`, `abstract`, `call`, `ceval`, `genobject`, `funcobject`).
 - Host-boundary import guard test (`tests/test_host_boundary.py`).
+- Pure-Python `_collections` (deque, defaultdict, OrderedDict), `array`,
+  `_weakref` and `gc` in `pp/lib` (weak refs never die; `gc.collect()` frees
+  nothing; see BLOCKERS.md).
 - Stdlib tracking: tiers 1–4 (49 modules) validated by CPython's Lib/test at
   tag v3.15.2, dashboard in `docs/dashboard.html`.
 - Design rule: C modules are reimplemented in Python, limitations accepted
@@ -23,13 +26,11 @@ Branches below are pushed to GitHub.
 
 | Branch | What | Review | Gate | Next step |
 |---|---|---|---|---|
-| `impl/m3-fixes` | Milestone 3 regression fixes; CPython-style version-tag type cache; no new host imports; warnings go through the guest `warnings` | round 2: fix (guest-visible slot table, `__dict__` property regression, Protocol class leak) | round 2: no drops except `difflib` timeout (perf) | fix round 3 |
-| `impl/collections` | Pure-Python `_collections` (deque, defaultdict, OrderedDict, views) | round 2: fix (OrderedDict instance dict, mutation during iteration) | round 2: `pprint` back to 77/77 | fix round 3 |
-| `impl/sre` | Pure-Python `_sre` regex engine (`re` fully in Python) | merge, with a limit: `RecursionError` on group repeats over ~600 chars | clean vs `main` | rebase after the two above (conflicts); explicit-stack matcher on `impl/sre-stack` |
-| `impl/array-weakref` | Pure-Python `array`, `_weakref`, `gc` | round 2: fix (rebase, subclass return types, `array.array` name) | weakref/object-death drops (accepted) | fix round 3 |
+| `impl/m3-fixes` | Milestone 3 regression fixes; CPython-style version-tag type cache; no new host imports; warnings go through the guest `warnings` | round 3: merge (storage hack aside) | round 3: no drops except `difflib` timeout (perf) | round 4: slot data in a VM-side weak table; then judge |
+| `impl/sre` | Pure-Python `_sre` regex engine (`re` fully in Python) | merge, with a limit: `RecursionError` on group repeats over ~600 chars | clean vs `main` | rebase after `impl/m3-fixes` (conflicts); explicit-stack matcher on `impl/sre-stack` (9bf8304, test_re 160/168) |
 
-Merge order: `impl/m3-fixes` → `impl/collections` → `impl/sre` →
-`impl/array-weakref`; regenerate the dashboard after each.
+Merge order: `impl/m3-fixes` → `impl/sre` (rebased) → `impl/sre-stack`;
+regenerate the dashboard after each.
 
 ## Next
 
