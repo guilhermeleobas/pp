@@ -186,9 +186,24 @@ class deque:
 
     def popleft(self):
         """Remove and return the leftmost element."""
-        if not self.__n:
+        n = self.__n
+        if not n:
             raise IndexError("pop from an empty deque")
-        return self.__popleft()
+        blocks = self.__blocks
+        lb = self.__lb
+        blk = blocks[0]
+        item = blk[lb]
+        blk[lb] = None
+        self.__n = n - 1
+        self.__state += 1
+        if n == 1:
+            self.__empty()
+        elif lb == _BLOCKLEN - 1:
+            del blocks[0]
+            self.__lb = 0
+        else:
+            self.__lb = lb + 1
+        return item
 
     def extend(self, iterable, /):
         """Extend the right side of the deque with elements from the iterable."""
@@ -521,6 +536,9 @@ class deque:
             return f"{name}({aslist!r})"
         finally:
             _repr_running.discard(key)
+
+    def __dir__(self):
+        return [n for n in object.__dir__(self) if not n.startswith("_deque__")]
 
     def __sizeof__(self):
         return object.__sizeof__(self) + 8 * _BLOCKLEN * len(self.__blocks)
@@ -939,6 +957,10 @@ class OrderedDict(dict):
     "Dictionary that remembers insertion order"
 
     __module__ = "collections"
+    # Internal state lives in slots so that vars(od) stays empty; subclasses
+    # still get an instance __dict__ through the explicit "__dict__" slot.
+    __slots__ = ("__hardroot", "__root", "__map", "__state", "__dict__",
+                 "__weakref__")
 
     def __new__(cls, /, *args, **kwds):
         "Create the ordered dict object and set up the underlying structures."
@@ -990,6 +1012,8 @@ class OrderedDict(dict):
         return self.__walk(True)
 
     def __walk(self, reverse):
+        # Like odictiter_nextkey: the next node is fetched ahead of the yield
+        # and the checks run on every fetch, so the final step is covered too.
         root = self.__root
         curr = root.prev if reverse else root.next
         state = self.__state
@@ -999,8 +1023,9 @@ class OrderedDict(dict):
                 raise RuntimeError("OrderedDict mutated during iteration")
             if len(self) != size:
                 raise RuntimeError("OrderedDict changed size during iteration")
-            yield curr.key
+            key = curr.key
             curr = curr.prev if reverse else curr.next
+            yield key
 
     def clear(self):
         "od.clear() -> None.  Remove all items from od."
@@ -1127,21 +1152,17 @@ class OrderedDict(dict):
 
     def __reduce__(self):
         "Return state information for pickling"
-        state = self.__getstate__()
-        if state:
-            if isinstance(state, tuple):
-                state, slots = state
-            else:
-                slots = {}
-            state = state.copy()
-            slots = slots.copy()
-            for k in vars(OrderedDict()):
-                state.pop(k, None)
-                slots.pop(k, None)
-            if slots:
-                state = state, slots
-            else:
-                state = state or None
+        state = self.__dict__.copy() or None
+        slots = {}
+        for name in _copyreg._slotnames(type(self)):
+            if name.startswith("_OrderedDict__"):
+                continue
+            try:
+                slots[name] = getattr(self, name)
+            except AttributeError:
+                pass
+        if slots:
+            state = (state, slots)
         return self.__class__, (), state, None, iter(self.items())
 
     def copy(self):
