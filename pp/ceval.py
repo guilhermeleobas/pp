@@ -5,7 +5,6 @@ import sys
 import types
 
 import opcode as _opcode
-import operator as _operator
 
 from pp import call as _call
 from pp import errors as _errors
@@ -112,6 +111,28 @@ BINARY_OPS = tuple(_NB_FUNCS[name] for name, _ in _opcode._nb_ops)
 # Specialized BINARY_OP / COMPARE_OP / TO_BOOL (BINARY_OP_ADD_INT, COMPARE_OP_INT,
 # TO_BOOL_LIST, ...): for exact builtin operand types the slot functions are the
 # C implementations of the very same operations, so call them directly.
+# (Lib/operator.py's pure-Python definitions.)
+class _operator:
+    add = staticmethod(lambda a, b: a + b)
+    and_ = staticmethod(lambda a, b: a & b)
+    floordiv = staticmethod(lambda a, b: a // b)
+    lshift = staticmethod(lambda a, b: a << b)
+    mul = staticmethod(lambda a, b: a * b)
+    mod = staticmethod(lambda a, b: a % b)
+    or_ = staticmethod(lambda a, b: a | b)
+    pow = staticmethod(lambda a, b: a ** b)
+    rshift = staticmethod(lambda a, b: a >> b)
+    sub = staticmethod(lambda a, b: a - b)
+    truediv = staticmethod(lambda a, b: a / b)
+    xor = staticmethod(lambda a, b: a ^ b)
+    lt = staticmethod(lambda a, b: a < b)
+    le = staticmethod(lambda a, b: a <= b)
+    eq = staticmethod(lambda a, b: a == b)
+    ne = staticmethod(lambda a, b: a != b)
+    gt = staticmethod(lambda a, b: a > b)
+    ge = staticmethod(lambda a, b: a >= b)
+
+
 _OPERATOR_FOR_NB = {
     "NB_ADD": _operator.add, "NB_AND": _operator.and_, "NB_FLOOR_DIVIDE": _operator.floordiv,
     "NB_LSHIFT": _operator.lshift, "NB_MULTIPLY": _operator.mul,
