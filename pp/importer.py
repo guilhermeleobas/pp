@@ -46,7 +46,6 @@ HOST_MODULES_PERMANENT = frozenset({
 # Temporary: C modules we intend to replace with pure Python (pp/lib). Each
 # entry is tracked debt.
 HOST_MODULES_TEMPORARY = frozenset({
-    "_collections",  # deque, defaultdict, OrderedDict, _count_elements, _tuplegetter
     "_sre",          # re engine
     "math",
     "_struct",
