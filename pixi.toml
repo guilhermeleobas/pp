@@ -8,5 +8,8 @@ python = "3.15.*"
 pytest = "*"
 
 [tasks]
-test = "python -m pytest -q"
+test = "python -m pytest -q tests"
 pp = "python -m pp"
+fetch-cpython = "bash tools/fetch_cpython.sh"
+status = { cmd = "python tools/stdlib_status.py", depends-on = ["fetch-cpython"] }
+cpython-tests = { cmd = "python tools/stdlib_status.py --run", depends-on = ["fetch-cpython"] }
