@@ -12,6 +12,27 @@ library written entirely in Python. The structure mirrors CPython so that
 - `pixi run test` runs the test suite; `pixi run pp <args>` runs the CLI.
 - The VM targets 3.15 bytecode only. Other host versions are unsupported.
 
+## References
+
+Use these as the primary references; mirror their structure and semantics
+rather than inventing new designs:
+
+- **CPython 3.15** (`<cpython checkout>`, branch
+  `upstream/3.15`; read with `git show upstream/3.15:<path>`): `Python/bytecodes.c`
+  (opcode semantics), `Python/ceval.c` (dispatch, exception unwinding, argument
+  binding), `Python/intrinsics.c`, `Objects/genobject.c`, `Objects/funcobject.c`,
+  `Objects/typeobject.c`, `Python/bltinmodule.c` (`__build_class__`, `super`),
+  `Lib/importlib/_bootstrap.py` and `_bootstrap_external.py` (import system).
+- **Dynamo** (`torch/_dynamo`): a Python
+  implementation of a CPython bytecode interpreter loop. Useful prior art for
+  `symbolic_convert.py` (`InstructionTranslator`: per-opcode handlers, CALL /
+  LOAD_ATTR / LOAD_SUPER_ATTR forms, exception table handling, generator and
+  `with` handling, version differences), `bytecode_transformation.py` and
+  `bytecode_analysis.py` (decoding, exception table, jump targets),
+  `variables/` (how CPython object protocols are modeled in Python, e.g.
+  `tp_*` slot behavior). Dynamo traces symbolically; pp executes concretely, so
+  take its opcode semantics and edge cases, not its tracing machinery.
+
 ## Host boundary (prototype)
 
 Borrowed from the host CPython, for now:
