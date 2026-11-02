@@ -1,11 +1,13 @@
 """CLI: python -m pp run FILE | python -m pp dis FILE"""
 
 import argparse
+import os
 import sys
 import types
 
 from pp.bytecode import compile_source, decode
 from pp.ceval import run_file
+from pp.errors import UnimplementedOpcode
 
 
 def _dis_code(code: types.CodeType, out) -> None:
@@ -44,6 +46,13 @@ def main(argv=None) -> int:
             raise
         except BaseException as e:
             sys.excepthook(type(e), e, e.__traceback__)
+            if isinstance(e, UnimplementedOpcode):
+                # The VM gave up mid-execution: skip interpreter shutdown, whose
+                # finalizers would run the abandoned frames' cleanup code and bury
+                # this message under unrelated output.
+                sys.stdout.flush()
+                sys.stderr.flush()
+                os._exit(1)
             return 1
     else:
         with open(ns.file, encoding="utf-8") as fh:

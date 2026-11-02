@@ -38,7 +38,6 @@ from pp.errors import (PyErr_GivenExceptionMatches, PyExceptionClass_Check, PyTh
 from pp.frame import NULL, Frame  # noqa: F401  (NULL is part of the pp.vm API)
 from pp.funcobject import Function, PyFunction_New, bind_arguments, builtins_from_globals
 from pp.genobject import PyAsyncGenObject, PyCoroObject, PyGenObject
-from pp import genobject as _genobject
 
 _GenericGetAttr = _obj.PyObject_GenericGetAttr
 _GenericSetAttr = _obj.PyObject_GenericSetAttr
@@ -575,7 +574,6 @@ class VirtualMachine:
                             if table[instr.opcode](frame, instr) is not None:
                                 return frame.return_value
                     except UnimplementedOpcode:
-                        _genobject.abort_vm()
                         raise
                     except BaseException as e:
                         exc = e
