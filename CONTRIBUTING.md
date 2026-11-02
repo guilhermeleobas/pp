@@ -77,6 +77,10 @@ downloads CPython's `Lib/` at tag v3.15.2 into `vendor/`. Always use that tag.
 - Never commit generated files: `STATUS.md`, `docs/dashboard.html` and
   `tools/test_results.json`. Only the orchestrator regenerates them, on
   `main`.
-- Never push to `main`, and don't open pull requests. Push your branch.
-  After a rebase, push with `--force-with-lease`.
+- Never push to `main`. After a rebase, push with `--force-with-lease`.
+- External contributors: fork the repository and open a pull request
+  against `main`. The pull request goes through the same review, gate and
+  judge steps.
+- Agents working inside the project's own orchestration push their branch
+  to this repository instead, and the orchestrator merges it.
 - Rebase onto `origin/main` before asking for review.
