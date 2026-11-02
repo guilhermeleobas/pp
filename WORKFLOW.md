@@ -47,7 +47,7 @@ of the task, skipping or parking the blocked part. The orchestrator adds it to
 
 ## Remote and machines
 
-- GitHub: `guilhermeleobas/pp` (private). Development is local; no pull
+- GitHub: `guilhermeleobas/pp` (public). Development is local; no pull
   requests. The orchestrator pushes `main` from time to time (after merges).
   Agent branches stay local unless a remote session needs them.
 - **All agent work runs on `build machine`** (SSH host, many cores, clone at
