@@ -59,6 +59,9 @@ Rules for code under `pp/`:
   `dataclasses`, `enum`, `typing`, `io`, `argparse`, `os`, `_imp` (importer only). Ask before adding to
   this list.
 - No C extensions, no `ctypes`.
+- `pp/lib/` is guest code: it may import other `pp/lib` modules, pure-Python
+  stdlib modules and the `HOST_MODULES` boundary list, all through the VM
+  importer; it may not import `pp.*` (checked by `tests/test_host_boundary.py`).
 
 C modules: reimplement, don't borrow. Every C module the guest imports gets a
 pure-Python replacement in `pp/lib/` (`_sre`, `array`, `_weakref`, `gc`,

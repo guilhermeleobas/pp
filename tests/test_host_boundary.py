@@ -8,8 +8,11 @@ strings that import something, and `sys.modules[...]` lookups. Review those by h
 """
 import ast
 import pathlib
+import sysconfig
 
 import pytest
+
+from pp.importer import HOST_MODULES
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PP = ROOT / "pp"
@@ -60,6 +63,17 @@ def _guest_modules():
         if p.suffix == ".py" or (p.is_dir() and (p / "__init__.py").exists()):
             names.add(p.stem)
     return names
+
+
+_STDLIB = pathlib.Path(sysconfig.get_paths()["stdlib"])
+
+
+def _guest_importable(name):
+    # pp/lib modules are guest code: their imports go through the VM importer,
+    # which serves pure-Python stdlib modules and the HOST_MODULES boundary list.
+    if name in HOST_MODULES:
+        return True
+    return (_STDLIB / f"{name}.py").exists() or (_STDLIB / name / "__init__.py").exists()
 
 
 class _Scanner(ast.NodeVisitor):
@@ -117,6 +131,8 @@ class _Scanner(ast.NodeVisitor):
             pass
         elif self.in_lib and top in self.guest_modules:
             pass  # another guest module
+        elif self.in_lib and _guest_importable(top):
+            pass  # runs in the guest through the VM importer, like pp/lib itself
         else:
             self._add(node, f"import of {full!r} is not in the allowlist (DESIGN.md)")
 
@@ -231,7 +247,9 @@ CASES = [
     ("pp/other.py", HOST_CALL, ".__import__"),
     ("pp/lib/m.py", "import sys as _sys\nimport itertools", None),
     ("pp/lib/m.py", "import dis", "forbidden import"),
-    ("pp/lib/m.py", "import json", "not in the allowlist"),
+    ("pp/lib/m.py", "import _json", "not in the allowlist"),
+    ("pp/lib/m.py", "import warnings, copyreg, collections.abc", None),
+    ("pp/x.py", "import warnings", "not in the allowlist"),
     ("pp/lib/m.py", "from . import x", "relative import"),
     ("pp/lib/m.py", "from pp.ceval import x", "host implementation"),
     ("pp/lib/m.py", "__import__('os')", "__import__"),
