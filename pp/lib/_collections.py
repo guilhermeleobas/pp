@@ -861,10 +861,10 @@ class odict_keys(_Set):
         return len(self._od)
 
     def __iter__(self):
-        return iter(self._od)
+        return _odict_iterator(self._od, 1)
 
     def __reversed__(self):
-        return reversed(self._od)
+        return _odict_iterator(self._od, 5)
 
     def __contains__(self, key):
         return key in self._od
@@ -890,17 +890,13 @@ class odict_values(_Collection):
         return len(self._od)
 
     def __iter__(self):
-        od = self._od
-        for key in od:
-            yield od[key]
+        return _odict_iterator(self._od, 2)
 
     def __reversed__(self):
-        od = self._od
-        for key in reversed(od):
-            yield od[key]
+        return _odict_iterator(self._od, 6)
 
     def __contains__(self, value):
-        for v in self:
+        for v in _odict_iterator(self._od, 2):
             if v is value or v == value:
                 return True
         return False
@@ -926,14 +922,10 @@ class odict_items(_Set):
         return len(self._od)
 
     def __iter__(self):
-        od = self._od
-        for key in od:
-            yield (key, od[key])
+        return _odict_iterator(self._od, 3)
 
     def __reversed__(self):
-        od = self._od
-        for key in reversed(od):
-            yield (key, od[key])
+        return _odict_iterator(self._od, 7)
 
     def __contains__(self, item):
         key, value = item
@@ -947,6 +939,61 @@ class odict_items(_Set):
 _collections_abc.KeysView.register(odict_keys)
 _collections_abc.ValuesView.register(odict_values)
 _collections_abc.ItemsView.register(odict_items)
+
+
+class _odict_iterator:
+    """odict_iterator: state is recorded when the iterator is created.
+
+    kind bits as in odictobject.c: 1 keys, 2 values, 3 items (0 means keys),
+    4 reversed.
+    """
+
+    __slots__ = ("_od", "_state", "_size", "_curr", "_kind")
+    __module__ = "builtins"
+    __name__ = "odict_iterator"
+
+    def __init__(self, od, kind):
+        self._od = od
+        self._state = _odict_state.__get__(od)
+        self._size = len(od)
+        self._kind = kind
+        root = _od_root.__get__(od)
+        self._curr = root.prev if kind & 4 else root.next
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        od = self._od
+        if od is None:
+            raise StopIteration
+        curr = self._curr
+        if curr is _od_root.__get__(od):
+            self._od = None
+            raise StopIteration
+        if _odict_state.__get__(od) != self._state:
+            self._od = None
+            raise RuntimeError("OrderedDict mutated during iteration")
+        if len(od) != self._size:
+            self._size = -1
+            raise RuntimeError("OrderedDict changed size during iteration")
+        key = curr.key
+        self._curr = curr.prev if self._kind & 4 else curr.next
+        what = self._kind & 3
+        if what == 2:
+            return dict.__getitem__(od, key)
+        if what == 3:
+            return (key, dict.__getitem__(od, key))
+        return key
+
+    def __length_hint__(self):
+        od = self._od
+        return 0 if od is None else self._size
+
+    def __reduce__(self):
+        od = self._od
+        items = list(self) if od is not None else []
+        return iter, (items,)
 
 
 class _Link:
@@ -1005,27 +1052,11 @@ class OrderedDict(dict):
 
     def __iter__(self):
         "od.__iter__() <==> iter(od)"
-        return self.__walk(False)
+        return _odict_iterator(self, 0)
 
     def __reversed__(self):
         "od.__reversed__() <==> reversed(od)"
-        return self.__walk(True)
-
-    def __walk(self, reverse):
-        # Like odictiter_nextkey: the next node is fetched ahead of the yield
-        # and the checks run on every fetch, so the final step is covered too.
-        root = self.__root
-        curr = root.prev if reverse else root.next
-        state = self.__state
-        size = len(self)
-        while curr is not root:
-            if self.__state != state:
-                raise RuntimeError("OrderedDict mutated during iteration")
-            if len(self) != size:
-                raise RuntimeError("OrderedDict changed size during iteration")
-            key = curr.key
-            curr = curr.prev if reverse else curr.next
-            yield key
+        return _odict_iterator(self, 4)
 
     def clear(self):
         "od.clear() -> None.  Remove all items from od."
@@ -1085,13 +1116,20 @@ class OrderedDict(dict):
             root.next = link
         self.__state += 1
 
+    def __dir__(self):
+        return [n for n in object.__dir__(self)
+                if not n.startswith("_OrderedDict__")]
+
     def __sizeof__(self):
-        sizeof = _sys.getsizeof
-        n = len(self) + 1
-        size = sizeof(self.__dict__)
-        size += sizeof(self.__map) * 2
-        size += sizeof(self.__hardroot) * n
-        size += sizeof(self.__root) * n
+        # Fixed base plus the dict's own growth, od_fast_nodes (8 bytes per
+        # hash slot) and one 32-byte node per entry, as in odictobject.c.
+        n = len(self)
+        size = 112 + dict.__sizeof__(dict(self)) - dict.__sizeof__({})
+        if n:
+            slots = 8
+            while 2 * slots // 3 < n:
+                slots *= 2
+            size += 8 * slots + 32 * n
         return size
 
     update = __update = _collections_abc.MutableMapping.update
@@ -1205,3 +1243,7 @@ class OrderedDict(dict):
         new = self.__class__(other)
         new.update(self)
         return new
+
+
+_od_root = OrderedDict._OrderedDict__root
+_odict_state = OrderedDict._OrderedDict__state
