@@ -30,12 +30,14 @@
   "total": 0
  },
  "difflib": {
-  "detail": ">120s",
-  "result": "timeout"
+  "detail": "FAILED (failures=25)",
+  "passed": 36,
+  "result": "partial",
+  "total": 61
  },
  "enum": {
-  "detail": "FAILED (failures=10, errors=5, skipped=4)",
-  "passed": 1068,
+  "detail": "FAILED (failures=9, errors=5, skipped=4)",
+  "passed": 1069,
   "result": "partial",
   "total": 1087
  },
@@ -58,7 +60,7 @@
   "total": 69
  },
  "itertools": {
-  "detail": ">120s",
+  "detail": ">600s",
   "result": "timeout"
  },
  "keyword": {
@@ -86,10 +88,10 @@
   "total": 33
  },
  "string": {
-  "detail": "no unittest summary",
-  "passed": 0,
-  "result": "pass",
-  "total": 0
+  "detail": "FAILED (errors=54)",
+  "passed": 1,
+  "result": "partial",
+  "total": 55
  },
  "textwrap": {
   "detail": "",
@@ -98,8 +100,8 @@
   "total": 68
  },
  "traceback": {
-  "detail": "FAILED (failures=55, errors=149, skipped=133)",
-  "passed": 104,
+  "detail": "FAILED (failures=50, errors=149, skipped=133)",
+  "passed": 109,
   "result": "partial",
   "total": 441
  },
@@ -110,9 +112,9 @@
   "total": 0
  },
  "unittest": {
-  "detail": "no unittest summary",
+  "detail": "RuntimeError: Cannot close a running event loop",
   "passed": 0,
-  "result": "pass",
+  "result": "fail",
   "total": 0
  },
  "warnings": {
