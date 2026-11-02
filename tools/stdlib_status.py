@@ -31,14 +31,17 @@ TIERS = {
     3: ["traceback", "difflib", "pprint", "argparse", "unittest"],
     4: ["bisect", "colorsys", "copy", "dataclasses", "graphlib", "json", "fractions", "statistics", "shlex",
         "glob", "posixpath", "tomllib", "base64", "html", "csv", "ipaddress", "random", "typing", "decimal",
-        "datetime", "inspect", "dis", "ast", "queue", "calendar", "optparse", "configparser"],
+        "datetime", "inspect", "dis", "ast", "queue", "calendar", "optparse", "configparser", "array", "gc"],
 }
 TRACKED = {m: t for t, mods in TIERS.items() for m in mods}
 
 # Modules we do not plan to support fully: what is out of scope and why. Shown next to
 # the module's test counts, so "partial" there is expected rather than a regression.
 # Example: SCOPE_NOTES = {"weakref": "GC-timing tests depend on host refcounting"}
-SCOPE_NOTES = {}
+SCOPE_NOTES = {
+    "weakref": "weak references never die and callbacks never fire (host objects; see pp/lib/_weakref.py)",
+    "gc": "collect() frees nothing; object enumeration is empty (see pp/lib/gc.py)",
+}
 
 # Modules whose pure-Python twin lives under a different name.
 PY_TWINS = {"decimal": "_pydecimal", "io": "_pyio", "datetime": "_pydatetime"}

@@ -27,6 +27,10 @@ Blocked work is retried once its blocker is resolved.
 | `sys.setrecursionlimit` rejects low limits at current depth (VM frames count toward depth); `RecursionError` on deep-but-legal guest recursion | `tomllib` (2), `ast` (1) | 2026-11-02 | open |
 | `dis` output differs: `COPY_FREE_VARS` shown and line/`RESUME` offsets differ from CPython's bytecode | `dis` (7) | 2026-11-02 | open |
 | Performance: whole-module runs exceed the 600s timeout (`datetime` via `_pydatetime`, `statistics`; tests pass up to the cutoff, only a few errors) | `datetime`, `statistics`, `itertools` | 2026-11-02 | open |
+| `_weakref` (pure Python): host values' death is invisible to pp, so weak references are strong, never die and callbacks never fire; created refs are kept in a module registry forever. Fix needs pp-owned object lifetimes (refcounts) or a host hook | `weakref`/`weakset` CPython tests that rely on collection, `WeakValueDictionary`/`WeakSet` auto-removal, `weakref.finalize` firing | 2026-11-02 | accepted limitation (pp/lib/_weakref.py) |
+| `gc` (pure Python): `collect()` frees nothing and returns 0; `get_objects`/`get_referrers`/`get_referents` are empty, `is_tracked`/`is_finalized` are False, callbacks never run | `gc` CPython test, any test asserting objects are collected | 2026-11-02 | accepted limitation (pp/lib/gc.py) |
+| `array` (pure Python): `buffer_info()` address is `id()` of the backing bytearray; `memoryview(a).format` is `'B'` for `u`, `w`, `Zf`, `Zd`; NaN payload/sign not preserved; item access is interpreted per element (slow) | `array` CPython test (weakref death tests), performance | 2026-11-02 | accepted limitation (pp/lib/array.py) |
+| Guest `warnings.catch_warnings`/`assertWarns` do not see warnings raised by the host `_warnings.warn` (the C `warn` uses the host `warnings` module state). Needs a pure-Python `_warnings` | `array` `test_typecode_u_deprecation` (2 tests), any `assertWarns` test | 2026-11-02 | open |
 
 ## To do
 
