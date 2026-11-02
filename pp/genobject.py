@@ -106,12 +106,22 @@ class PyGenObject:
         return gen_close(self)
 
     def __del__(self):
-        if FRAME_STATE_SUSPENDED(self.gi_frame_state):
+        if FRAME_STATE_SUSPENDED(self.gi_frame_state) and not _vm_aborted:
             err = None
             try:
                 self.close()
             except BaseException as e:
                 err = e
+
+
+# Set when the VM gives up on an unimplemented opcode: the abandoned frames must
+# not be finalized (running their cleanup code would only produce misleading output).
+_vm_aborted = False
+
+
+def abort_vm() -> None:
+    global _vm_aborted
+    _vm_aborted = True
 
 
 def gen_get_state(gen) -> str:
