@@ -47,7 +47,6 @@ HOST_MODULES_PERMANENT = frozenset({
 # entry is tracked debt.
 HOST_MODULES_TEMPORARY = frozenset({
     "_collections",  # deque, defaultdict, OrderedDict, _count_elements, _tuplegetter
-    "_sre",          # re engine
     "math",
     "_struct",
     "_string",       # string.Formatter helpers
