@@ -474,6 +474,7 @@ class Reader:
 
 
 Reader.__module__ = '_csv'
+Reader.__name__ = Reader.__qualname__ = 'reader'  # the C type is _csv.reader
 
 
 def reader(*args, **kwargs):
@@ -624,6 +625,7 @@ class Writer:
 
 
 Writer.__module__ = '_csv'
+Writer.__name__ = Writer.__qualname__ = 'writer'  # the C type is _csv.writer
 
 
 def _is_number(obj):

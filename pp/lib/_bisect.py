@@ -39,10 +39,14 @@ def _check_sequence(a):
 def _args(a, lo, hi):
     lo = _ssize(lo)
     if lo < 0:
-        raise ValueError('lo must be non-negative')
+        raise ValueError('lo cannot be negative')
     if hi is None:
         hi = -1
     else:
+        # _Py_convert_optional_to_ssize_t
+        if not hasattr(type(hi), '__index__'):
+            raise TypeError("argument should be integer or None, "
+                            f"not '{type(hi).__name__}'")
         hi = _ssize(hi)
     if hi == -1:
         hi = len(a)

@@ -541,16 +541,22 @@ class Encoder:
         w.append('}')
 
     def _list(self, w, seq, level, cache):
+        # PySequence_Fast: only exact lists/tuples are indexed in place;
+        # subclasses (which may override __iter__/__len__) are snapshotted
+        # through iteration.
+        orig = seq
+        if type(seq) is not list and type(seq) is not tuple:
+            seq = list(seq)
         if len(seq) == 0:
             w.append('[]')
             return
         markers = self.markers
         ident = None
         if markers is not None:
-            ident = id(seq)
+            ident = id(orig)
             if ident in markers:
                 raise ValueError("Circular reference detected")
-            markers[ident] = seq
+            markers[ident] = orig
         w.append('[')
         separator = self.item_separator
         if self.indent is not None:
@@ -565,7 +571,7 @@ class Encoder:
             try:
                 self._obj(w, obj, level, cache)
             except BaseException as exc:
-                exc.add_note(f'when serializing {_fqn(seq)} item {i}')
+                exc.add_note(f'when serializing {_fqn(orig)} item {i}')
                 raise
             i += 1
         if ident is not None:
