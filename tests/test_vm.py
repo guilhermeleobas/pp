@@ -4,6 +4,7 @@ import contextlib
 import dis
 import io
 import pathlib
+import re
 import types
 
 import pytest
@@ -38,7 +39,7 @@ SEND END_SEND CLEANUP_THROW CALL_FUNCTION_EX CALL_INTRINSIC_1 CALL_INTRINSIC_2
 LOAD_BUILD_CLASS LOAD_SUPER_ATTR SETUP_ANNOTATIONS RAISE_VARARGS RERAISE
 PUSH_EXC_INFO POP_EXCEPT CHECK_EXC_MATCH CHECK_EG_MATCH WITH_EXCEPT_START
 LOAD_SPECIAL IMPORT_NAME IMPORT_FROM GET_LEN MATCH_CLASS MATCH_MAPPING
-MATCH_SEQUENCE MATCH_KEYS DICT_MERGE
+MATCH_SEQUENCE MATCH_KEYS DICT_MERGE BUILD_TEMPLATE BUILD_INTERPOLATION
 """.split()) | {op for op in dis.opmap
                 if op.startswith(("LOAD_FAST", "STORE_FAST")) and op != "STORE_FAST_MAYBE_NULL"}
 SUPPORTED = MILESTONE_1 | MILESTONE_2
@@ -47,7 +48,6 @@ SUPPORTED = MILESTONE_1 | MILESTONE_2
 # Cross-checked against `dis` by test_scope_table.
 OUT_OF_SCOPE = {
     "xfail_async": "async def / await",
-    "xfail_tstring": "template strings",
 }
 
 
@@ -83,8 +83,12 @@ def run_capture(fn):
     return buf.getvalue(), exc, g
 
 
+def norm(out):
+    return re.sub(r"0x[0-9a-fA-F]+", "0x?", out)
+
+
 def plain(g):
-    return {k: repr(v) for k, v in g.items()
+    return {k: norm(repr(v)) for k, v in g.items()
             if not k.startswith("__") and type(v) in (int, float, str, list, tuple, dict, bool, bytes)}
 
 
@@ -101,7 +105,7 @@ def test_snippet(path):
     p_out, p_exc, p_g = run_capture(lambda: pp.run_source(src, str(path)))
     if isinstance(p_exc, NotImplementedError) and not isinstance(h_exc, NotImplementedError):
         raise p_exc
-    assert p_out == h_out
+    assert norm(p_out) == norm(h_out)
     assert type(p_exc) is type(h_exc), (h_exc, p_exc)
     if h_exc is None:
         assert plain(p_g) == plain(h_g)
@@ -155,11 +159,11 @@ def test_exceptions_not_wrapped():
 
 def test_unimplemented_opcode():
     assert issubclass(pp.errors.UnimplementedOpcode, NotImplementedError)
-    src = 'x = 1\nt = t"{x}"\n'
-    assert "BUILD_TEMPLATE" in missing_opcodes(src, "<s>")
+    src = "x = 1\nasync def f():\n    await x\nf().send(None)\n"
+    assert "GET_AWAITABLE" in missing_opcodes(src, "<s>")
     with pytest.raises(pp.errors.UnimplementedOpcode) as ei:
         pp.run_source(src)
-    assert "BUILD_INTERPOLATION" in str(ei.value) or "BUILD_TEMPLATE" in str(ei.value)
+    assert "GET_AWAITABLE" in str(ei.value)
 
 
 def test_globals_without_builtins_gets_them():
