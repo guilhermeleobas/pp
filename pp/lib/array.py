@@ -4,11 +4,16 @@ Semantics follow Modules/arraymodule.c (3.15): all typecodes (b B u w h H i I
 l L q Q e f d Zf Zd), slicing, comparisons, ``+ * += *=``, pickling through
 ``__reduce_ex__`` and ``_array_reconstructor``, and the buffer protocol.
 
-Storage is a ``bytearray`` in native byte order. Items are packed and unpacked
-with ``int.to_bytes`` / ``int.from_bytes`` and a pure-Python IEEE 754 codec
-(no ``struct``). ``__buffer__`` hands out a ``memoryview`` of that bytearray,
-cast to the item format when ``memoryview`` supports one, so exports block
-resizing (BufferError) as in CPython.
+Storage is a ``bytearray`` in native byte order. Single items are packed with
+``int.to_bytes`` / ``int.from_bytes`` and, for ``f``/``d``/``Zf``/``Zd``, with
+``memoryview.cast`` (native layout, no ``struct``); ``e``, float32 overflow and
+``_array_reconstructor`` use a pure-Python IEEE 754 codec. Bulk operations
+(constructor, ``extend``, ``fromlist``, ``tolist``, comparison, slicing,
+``index``/``count``/``in``) run as host builtins over whole lists (``map``,
+``join``, ``memoryview.tolist``) and fall back to the per-item codec for values
+the fast path does not take, so errors match CPython. ``__buffer__`` hands out a
+``memoryview`` of the bytearray, cast to the item format when ``memoryview`` has
+one, so exports block resizing (BufferError) as in CPython.
 
 Limitations:
   * ``buffer_info()[0]`` is ``id()`` of the backing bytearray, not a machine
@@ -16,8 +21,11 @@ Limitations:
   * ``memoryview(a).format`` is ``'B'`` (itemsize 1) for the typecodes
     ``memoryview.cast`` has no format for (``u``, ``w``, ``Zf``, ``Zd``).
   * NaN payloads and the sign of a NaN are not preserved when packing.
-  * Item access is interpreted bytecode per element, so it is much slower than
-    the C module.
+  * Per-item access (``a[i]``, ``append``) is interpreted bytecode, slower than
+    the C module; bulk operations are within a small factor of it.
+  * Iterating an array of more than 1 KiB uses a list iterator over a snapshot
+    of the items (so ``type(iter(a))`` differs and mutation during the
+    iteration is not seen); smaller arrays use a live ``arrayiterator``.
   * Layout assumes LP64 (``l``/``L`` are 8 bytes) unless ``sys.platform`` is
     ``win32``; ``u`` and ``w`` are both 4-byte UCS4.
 """
