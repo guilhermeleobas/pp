@@ -5,7 +5,7 @@ import sys
 import types
 
 from pp.bytecode import compile_source, decode
-from pp.vm import run_file
+from pp.ceval import run_file
 
 
 def _dis_code(code: types.CodeType, out) -> None:

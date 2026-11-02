@@ -6,7 +6,8 @@ import types
 
 from pp.bytecode import compile_source
 from pp.frame import NULL
-from pp.function import Function
+from pp.funcobject import Function
+from pp.object import PyObject_SetAttr
 
 _host_super = _host_builtins.super
 _MISSING = object()
@@ -182,12 +183,20 @@ def make_builtins(vm) -> types.ModuleType:
     def __import__(name, globals=None, locals=None, fromlist=(), level=0):
         return vm.importer.import_(name, globals, locals, fromlist, level)
 
+    def setattr(obj, name, value, /):
+        # builtin_setattr: PyObject_SetAttr (types get their slots updated there).
+        PyObject_SetAttr(obj, name, value)
+
+    def delattr(obj, name, /):
+        PyObject_SetAttr(obj, name, NULL)
+
     def print(*args, sep=" ", end="\n", file=None, flush=False):
         if file is None:
             file = vm.sys_module.stdout
         return _host_builtins.print(*args, sep=sep, end=end, file=file, flush=flush)
 
-    for f in (__build_class__, globals, locals, vars, dir, exec, eval, __import__, print):
+    for f in (__build_class__, globals, locals, vars, dir, exec, eval, __import__, print,
+              setattr, delattr):
         f.__module__ = "builtins"
         f.__qualname__ = f.__name__
         ns[f.__name__] = f

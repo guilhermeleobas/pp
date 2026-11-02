@@ -7,6 +7,7 @@ import sys
 import types
 
 from pp.bytecode import compile_source
+from pp.errors import _PyErr_GetTopmostException
 
 _PP_DIR = os.path.dirname(os.path.realpath(__file__))
 PP_LIB = os.path.join(_PP_DIR, "lib")
@@ -249,13 +250,13 @@ class Importer:
             return getattr(sys, name)
 
         def exc_info():
-            exc = vm.topmost_exception()
+            exc = _PyErr_GetTopmostException(vm.tstate).exc_value
             if exc is None:
                 return (None, None, None)
             return (type(exc), exc, exc.__traceback__)
 
         def exception():
-            return vm.topmost_exception()
+            return _PyErr_GetTopmostException(vm.tstate).exc_value
 
         def _getframe(depth=0, /):
             frame = vm.frame
