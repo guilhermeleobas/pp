@@ -33,7 +33,6 @@ th.sort{cursor:pointer;user-select:none;white-space:nowrap}th.sort:focus-visible
 .legend{display:flex;flex-wrap:wrap;gap:12px;color:var(--mut);font-size:.8rem;margin-bottom:6px}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;background:var(--c)}
 .badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:.78rem;color:#fff;background:var(--c);white-space:nowrap}
-.work{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px}
 .mut{color:var(--mut);margin:0}
 .card{background:var(--card);border:1px solid var(--bd);border-left:4px solid var(--c);border-radius:8px;padding:8px 10px}
 .card small{display:block;color:var(--mut);font-size:.8rem}
@@ -47,8 +46,6 @@ th.sort{cursor:pointer;user-select:none;white-space:nowrap}th.sort:focus-visible
 <p id="meta"></p>
 </header>
 <section>
-<h2 style="margin-top:1rem">Now in progress <span id="wupd" style="color:var(--mut);font-size:.8rem;font-weight:normal"></span></h2>
-<div class="work" id="work"></div>
 </section>
 <p id="empty" hidden>No modules tracked yet. Add names to <code>TRACKED</code> in <code>tools/stdlib_status.py</code>.</p>
 <main id="main">
@@ -82,20 +79,6 @@ const el = (tag, text, cls) => { const e = document.createElement(tag); if (text
 
 $("meta").textContent = "Generated " + D.generated + " against CPython " + D.cpython;
 
-const W = D.work || {items: []};
-$("wupd").textContent = W.updated ? "updated " + W.updated : "";
-if (!W.items.length) $("work").append(el("p", "Nothing running", "mut"));
-for (const i of W.items) {
-  const c = el("div", null, "card"), col = "var(--" + (["queued", "running", "waiting", "done", "failed"].includes(i.status) ? i.status : "queued") + ")";
-  c.style.setProperty("--c", col);
-  const top = el("div", null, "top"), b = el("span", i.status || "?", "badge");
-  top.append(el("b", i.task || "(untitled)"), b);
-  c.append(top, el("small", [i.role, i.model, i.where].filter(Boolean).join(" · ")));
-  if (i.branch) c.append(el("small", "branch " + i.branch));
-  if (i.started) c.append(el("small", "started " + i.started));
-  if (i.note) c.append(el("small", i.note));
-  $("work").append(c);
-}
 
 if (!D.rows.length) { $("empty").hidden = false; $("main").hidden = true; }
 

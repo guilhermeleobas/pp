@@ -51,14 +51,12 @@ of the task, skipping or parking the blocked part. The orchestrator adds it to
 - GitHub: `guilhermeleobas/pp` (public). Development is local; no pull
   requests. The orchestrator pushes `main` from time to time (after merges).
   Agent branches stay local unless a remote session needs them.
-- **All agent work runs on `build machine`** (SSH host, many cores, clone at
-  `~/git/pp`): implementers, testers, reviewers, gates and judges are separate
-  Claude sessions there, each in its own worktree. They push their branch
-  (`impl/<task>`, `test/<task>`) to GitHub; the orchestrator (on the Mac)
-  fetches, merges into `main` per the judge's decision, regenerates the
-  dashboard and pushes. The Mac runs agents only when build machine is unavailable.
+- Agent work runs on a separate build machine, each agent in its own
+  worktree. Agents push their branch (`impl/<task>`, `test/<task>`) to
+  GitHub; the orchestrator fetches, merges into `main` per the judge's
+  decision, regenerates the dashboard and pushes.
 - Remote sessions always `git fetch && git checkout origin/main` (or branch
-  from it) before starting, since `main` moves on the Mac.
+  from it) before starting, since `main` moves elsewhere.
 
 ## Budget
 

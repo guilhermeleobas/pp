@@ -18,13 +18,13 @@ library written entirely in Python. The structure mirrors CPython so that
 CPython 3.15's behavior or source, CPython wins. Dynamo is secondary prior art
 only, consulted for ideas and edge cases, never as the authority.
 
-- **CPython 3.15** (`<cpython checkout>`, branch
-  `upstream/3.15`; read with `git show upstream/3.15:<path>`): `Python/bytecodes.c`
+- **CPython 3.15** (a CPython checkout, branch `3.15`; read with
+  `git show <remote>/3.15:<path>`): `Python/bytecodes.c`
   (opcode semantics), `Python/ceval.c` (dispatch, exception unwinding, argument
   binding), `Python/intrinsics.c`, `Objects/genobject.c`, `Objects/funcobject.c`,
   `Objects/typeobject.c`, `Python/bltinmodule.c` (`__build_class__`, `super`),
   `Lib/importlib/_bootstrap.py` and `_bootstrap_external.py` (import system).
-- **Dynamo** (`torch/_dynamo`): a Python
+- **Dynamo** (`torch/_dynamo` in a PyTorch checkout): a Python
   implementation of a CPython bytecode interpreter loop. Useful prior art for
   `symbolic_convert.py` (`InstructionTranslator`: per-opcode handlers, CALL /
   LOAD_ATTR / LOAD_SUPER_ATTR forms, exception table handling, generator and
