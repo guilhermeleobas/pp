@@ -47,7 +47,6 @@ PP_BUILTIN_MODULES = frozenset({"_warnings"})
 # entry is tracked debt.
 HOST_MODULES_TEMPORARY = frozenset({
     "math",
-    "_string",       # string.Formatter helpers
     "_contextvars",
     "_random",
     "zlib",
