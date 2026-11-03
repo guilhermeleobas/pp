@@ -359,15 +359,20 @@ def _clear_gen_frame(gen) -> None:
 def gen_send_ex2(gen, arg, exc=None):
     """Resume the (EXECUTING) generator with `arg`, or by throwing `exc` into it.
     -> (PYGEN_NEXT, yielded value) or (PYGEN_RETURN, return value)."""
-    tstate = _S(gen).tstate
-    frame = _S(gen).iframe
+    return _resume(gen, _STATE_GET[type(gen)](gen), arg, exc)
+
+
+def _resume(gen, st, arg, exc):
+    tstate = st.tstate
+    frame = st.iframe
 
     # Push arg onto the frame's value stack
     frame.stack.append(arg)
 
+    exc_state = st.exc_state
     prev_exc_info = tstate.exc_info
-    _S(gen).exc_state.previous_item = prev_exc_info
-    tstate.exc_info = _S(gen).exc_state
+    exc_state.previous_item = prev_exc_info
+    tstate.exc_info = exc_state
 
     if exc is not None:
         _PyErr_ChainStackItem(tstate, exc)
@@ -379,31 +384,32 @@ def gen_send_ex2(gen, arg, exc=None):
     except BaseException as e:
         err = e
     tstate.exc_info = prev_exc_info
-    _S(gen).exc_state.previous_item = None
+    exc_state.previous_item = None
     # A suspended or finished generator frame has no caller (gen_send_ex2 sets
     # `previous = NULL`); keeping it would tie the generator to its last resumer.
     frame.previous = None
     if err is not None:
         # The generator frame is cleared when an exception propagates out of it.
-        _S(gen).frame_state = FRAME_CLEARED
-        _clear_gen_frame(gen)
+        st.frame_state = FRAME_CLEARED
+        st.iframe = None
         raise err
 
     if frame.yielded:
         # YIELD_VALUE: suspended (oparg 1 means a `yield from` / await in progress).
-        _S(gen).frame_state = FRAME_SUSPENDED_YIELD_FROM if frame.yield_oparg == 1 \
+        st.frame_state = FRAME_SUSPENDED_YIELD_FROM if frame.yield_oparg == 1 \
             else FRAME_SUSPENDED
         return PYGEN_NEXT, result
 
     # The generator just returned (as opposed to yielding).
-    _S(gen).frame_state = FRAME_CLEARED
-    _clear_gen_frame(gen)
+    st.frame_state = FRAME_CLEARED
+    st.iframe = None
     return PYGEN_RETURN, result
 
 
 def gen_send_ex(gen, arg, called_from_iternext=False):
     """-> (kind, value). `arg` is None for next(). Errors raise."""
-    frame_state = _S(gen).frame_state
+    st = _STATE_GET[type(gen)](gen)
+    frame_state = st.frame_state
     if frame_state == FRAME_CREATED and arg is not None:
         if PyCoro_CheckExact(gen):
             raise TypeError(NON_INIT_CORO_MSG)
@@ -420,8 +426,8 @@ def gen_send_ex(gen, arg, called_from_iternext=False):
             # `gen` is an exhausted generator: only return a value if called from send().
             return PYGEN_RETURN, None
         raise StopIteration
-    _S(gen).frame_state = FRAME_EXECUTING
-    return gen_send_ex2(gen, arg, None)
+    st.frame_state = FRAME_EXECUTING
+    return _resume(gen, st, arg, None)
 
 
 def _gen_set_stop_iteration(gen, result):
