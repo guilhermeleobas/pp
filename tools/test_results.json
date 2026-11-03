@@ -135,10 +135,10 @@
   "total": 140
  },
  "dataclasses": {
-  "detail": "FAILED (failures=20, errors=37, skipped=1)",
+  "detail": "FAILED (failures=19, errors=37, skipped=1)",
   "errors": 37,
-  "failures": 20,
-  "passed": 227,
+  "failures": 19,
+  "passed": 228,
   "result": "partial",
   "skipped": 1,
   "total": 285
@@ -341,10 +341,10 @@
   "total": 165
  },
  "random": {
-  "detail": "FAILED (errors=14, skipped=2)",
-  "errors": 14,
+  "detail": "FAILED (errors=15, skipped=2)",
+  "errors": 15,
   "failures": 0,
-  "passed": 100,
+  "passed": 99,
   "result": "partial",
   "skipped": 2,
   "total": 116
@@ -462,10 +462,10 @@
   "total": 205
  },
  "weakref": {
-  "detail": "FAILED (failures=49, errors=2, skipped=2)",
-  "errors": 2,
+  "detail": "FAILED (failures=49, errors=3, skipped=2)",
+  "errors": 3,
   "failures": 49,
-  "passed": 87,
+  "passed": 86,
   "result": "partial",
   "skipped": 2,
   "total": 140

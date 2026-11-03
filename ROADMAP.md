@@ -17,6 +17,7 @@ Branches below are pushed to GitHub.
   CPython-style method cache, warnings through the guest `warnings` module.
 - Pure-Python `_sre` (explicit-stack matcher, `re` entirely in Python) and
   accelerator stand-ins `_bisect`, `_datetime`, `_json`, `_csv`.
+- Pure-Python `_random` (Mersenne Twister, bit-identical to CPython).
 - Pure-Python `_struct` and `binascii`, and `tools/host_test.py`: runs
   CPython's Lib/test on host CPython with C modules swapped for their
   `pp/lib` versions (the fast loop for C-module work).
@@ -33,8 +34,6 @@ Branches below are pushed to GitHub.
 
 | Branch | What | Status |
 |---|---|---|
-| `impl/hashing` | Pure-Python `_md5`, `_sha1`, `_sha2`, `_sha3`, `_blake2` | in progress |
-| `impl/random-string` | Pure-Python `_random` | in progress |
 | `impl/zlib` | Pure-Python `zlib` | in progress |
 
 ## Next
@@ -47,7 +46,7 @@ Branches below are pushed to GitHub.
 3. **Layout**: split `pp/` into `pp/vm/` (host code) and `pp/lib/` (guest
    code) once in-flight branches have merged.
 4. **Remaining C modules → `pp/lib`** (one branch each): `math`,
-   `_string`, `_contextvars`, `_random`, `zlib`, `unicodedata`,
+   `_string`, `_contextvars`, `zlib`, `unicodedata`,
    `_locale`, `_typing`, `_codecs`, plus accelerator stand-ins `_pickle` and
    `_hashlib`. Iterate with `tools/host_test.py --swap <mod>`. Then a pp-native t-string
    `Template`/`Interpolation`.
@@ -65,7 +64,7 @@ What pp does not yet provide in pure Python, against Python 3.15's
 `sys.stdlib_module_names`. The importer is in `pp/importer.py`; pure-Python
 replacements live in `pp/lib/`. Already reimplemented: `_collections`,
 `array`, `_weakref`, `gc`, `itertools`, `_sre`, `_bisect`, `_datetime`,
-`_json`, `_csv`, `_struct`, `binascii`.
+`_json`, `_csv`, `_struct`, `binascii`, `_random`.
 
 ### C modules still borrowed from the host (to reimplement)
 
@@ -76,7 +75,6 @@ replacements live in `pp/lib/`. Already reimplemented: `_collections`,
 | `math` | `fractions`, `statistics`, `random`, `decimal`, ... | |
 | `_string` | `string.Formatter` | |
 | `_contextvars` | `contextvars`, `asyncio`, `decimal` | |
-| `_random` | `random` | |
 | `zlib` | `gzip`, `zipfile` | |
 | `unicodedata` | `unicodedata`, normalization in `str` helpers | |
 | `_locale` | `locale` | |
