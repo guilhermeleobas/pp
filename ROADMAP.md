@@ -33,14 +33,16 @@ Branches below are pushed to GitHub.
 
 | Branch | What | Status |
 |---|---|---|
-| `impl/async` | Async opcodes, coroutine and async-generator objects | judge: FIX (hide VM state, flat MRO) |
+| `impl/math` | Pure-Python `math` and `cmath` | in progress |
+| `impl/random-string` | Pure-Python `_random` and `_string` | in progress |
+| `impl/zlib` | Pure-Python `zlib` | in progress |
 
 ## Next
 
 1. **Performance** of the interpreter loop (first attempt not merged):
    the milestone 3 ~2× slowdown and the `difflib`, `itertools`, `datetime`,
    `statistics` timeouts.
-2. **Async opcodes** (in review, `impl/async`): unblocks `unittest`, `collections`, `contextlib`, `types` and everything
+2. **Async opcodes** (parked; `impl/async` is pushed, last judge round FIX): unblocks `unittest`, `collections`, `contextlib`, `types` and everything
    that imports `asyncio` through `test.support`.
 3. **Layout**: split `pp/` into `pp/vm/` (host code) and `pp/lib/` (guest
    code) once in-flight branches have merged.
