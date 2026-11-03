@@ -651,13 +651,29 @@ def _log_core(x, scale_fn=None):
     return _to_float(L << 16, C)
 
 
+def _log_helper(x):
+    if isinstance(x, int):
+        if x <= 0:
+            raise _dom_err("expected a positive input")
+        try:
+            x = float(x)
+        except OverflowError:
+            e = x.bit_length()
+            m, e2 = frexp(x / (1 << e))
+            return fma(_log_core(2.0), float(e + e2), _log_core(m))
+    return _log_core(x)
+
+
 def log(x, base=None, /):
     """Return the logarithm of x to the given base (default e)."""
-    num = _log_core(x)
+    num = _log_helper(x)
     if base is None:
         return num
-    den = _log_core(base)
-    return num / den
+    den = _log_helper(base)
+    try:
+        return num / den
+    except ZeroDivisionError:
+        raise ZeroDivisionError("division by zero") from None
 
 
 def log2(x, /):
@@ -1217,6 +1233,7 @@ def gamma(x, /):
 def fsum(seq, /):
     """Return an accurate floating-point sum of values in the iterable seq."""
     total = 0  # exact sum * 2**1074
+    partials = []
     pos_inf = neg_inf = False
     nan_seen = False
     for x in iter(seq):
@@ -1233,6 +1250,20 @@ def fsum(seq, /):
         if x:
             n, d = x.as_integer_ratio()
             total += n << (1075 - d.bit_length())
+        i = 0
+        for y in partials:
+            if abs(x) < abs(y):
+                x, y = y, x
+            hi = x + y
+            lo = y - (hi - x)
+            if lo:
+                partials[i] = lo
+                i += 1
+            x = hi
+        del partials[i:]
+        if x - x != 0.0:
+            raise OverflowError("intermediate overflow in fsum")
+        partials.append(x)
     if nan_seen:
         return nan
     if pos_inf and neg_inf:

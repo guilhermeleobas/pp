@@ -164,3 +164,8 @@ def _comb(n, k):
 for _f in (comb, factorial, gcd, isqrt, lcm, perm):
     _f.__module__ = "math.integer"
 del _f
+
+
+def __dir__():
+    return ["__doc__", "__loader__", "__name__", "__package__", "__spec__",
+            "comb", "factorial", "gcd", "isqrt", "lcm", "perm"]

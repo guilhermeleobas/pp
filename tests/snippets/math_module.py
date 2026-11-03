@@ -24,3 +24,13 @@ for f, a in [(math.sqrt, (-1,)), (math.log, (0,)), (math.fsum, ([math.inf, -math
         print(e)
 import math.integer
 print(math.integer.__name__, math.integer.factorial(5))
+try:
+    math.fsum([1e308, 1e308, -1e308])
+except OverflowError as e:
+    print(type(e).__name__, e)
+print(math.log(2**2000, 3))
+try:
+    math.log(5, 1)
+except ZeroDivisionError as e:
+    print(type(e).__name__, e)
+print([n for n in dir(math.integer) if n.startswith("_") and n not in ("__doc__", "__loader__", "__name__", "__package__", "__spec__", "__file__")])
