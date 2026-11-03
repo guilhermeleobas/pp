@@ -42,13 +42,27 @@ def FRAME_STATE_FINISHED(state: int) -> bool:
     return state == FRAME_CLEARED
 
 
+# Names of VM state that dir() does not list (CPython keeps them in the C struct).
+_HIDDEN = frozenset((
+    "_kind", "gi_frame_state", "gi_exc_state", "gi_iframe", "gi_tstate", "ag_closed",
+    "ag_hooks_inited", "ag_running_async", "ag_origin_or_finalizer", "ags_gen", "ags_sendval",
+    "ags_state", "agt_gen", "agt_typ", "agt_tb", "agt_val", "agt_state", "cw_coroutine"))
+
+
+def _public_dir(self):
+    names = [n for n in object.__dir__(self) if n not in _HIDDEN]
+    if type(self) is not PyGenObject:
+        # gi_code is the slot holding every kind's code; only generators have it.
+        names = [n for n in names if n != "gi_code"]
+    return sorted(names)
+
+
 class _PyGenBase:
     """The fields and finalizer shared by generators, coroutines and async generators
     (PyGenObject's common header)."""
     _kind = "generator"
 
-    # `__name__`/`__qualname__` are slots (as on the old Generator): gi_name and
-    # gi_qualname are views of them.
+    # `__name__`/`__qualname__` are slots (as on the old Generator).
     __slots__ = ("gi_frame_state", "gi_exc_state", "__name__", "__qualname__", "gi_iframe",
                  "gi_tstate", "gi_code", "__weakref__")
 
@@ -67,6 +81,8 @@ class _PyGenBase:
 
     def __del__(self):
         gen_finalize(self)
+
+    __dir__ = _public_dir
 
 
 def _gen_frame(gen):
@@ -104,8 +120,6 @@ class PyGenObject(_SendMixin, _PyGenBase):
     gi_running = property(lambda self: self.gi_frame_state == FRAME_EXECUTING)
     gi_suspended = property(lambda self: FRAME_STATE_SUSPENDED(self.gi_frame_state))
     gi_yieldfrom = property(_gen_yf)
-    gi_name = property(lambda self: self.__name__)
-    gi_qualname = property(lambda self: self.__qualname__)
 
     @property
     def gi_state(self):
@@ -120,15 +134,15 @@ class PyGenObject(_SendMixin, _PyGenBase):
         return gen_iternext(self)
 
 
-def gen_get_state(gen) -> str:
+def gen_get_state(gen, prefix="GEN") -> str:
     state = gen.gi_frame_state
     if state == FRAME_CREATED:
-        return "GEN_CREATED"
+        return prefix + "_CREATED"
     if FRAME_STATE_SUSPENDED(state):
-        return "GEN_SUSPENDED"
+        return prefix + "_SUSPENDED"
     if state == FRAME_EXECUTING:
-        return "GEN_RUNNING"
-    return "GEN_CLOSED"
+        return prefix + "_RUNNING"
+    return prefix + "_CLOSED"
 
 
 def gen_finalize(gen) -> None:
@@ -173,6 +187,8 @@ class PyCoroWrapper:
     """coroutine_wrapper: what `coro.__await__()` returns."""
     __slots__ = ("cw_coroutine",)
 
+    __dir__ = _public_dir
+
     def __init__(self, coro):
         self.cw_coroutine = coro
 
@@ -203,6 +219,7 @@ class PyCoroObject(_SendMixin, _PyGenBase):
     cr_await = property(_gen_yf)
     # Coroutine origin tracking (sys.set_coroutine_origin_tracking_depth) is not modeled.
     cr_origin = property(lambda self: None)
+    cr_state = property(lambda self: gen_get_state(self, "CORO"))
 
     def __await__(self):
         return PyCoroWrapper(self)
@@ -231,6 +248,7 @@ class PyAsyncGenObject(_PyGenBase):
     ag_running = property(lambda self: self.ag_running_async)
     ag_suspended = property(lambda self: FRAME_STATE_SUSPENDED(self.gi_frame_state))
     ag_await = property(_gen_yf)
+    ag_state = property(lambda self: gen_get_state(self, "AGEN"))
 
     def __aiter__(self):
         return self
@@ -258,11 +276,6 @@ class PyAsyncGenObject(_PyGenBase):
         return PyAsyncGenAThrow(self, args)
 
 
-for _cls, _name in ((PyGenObject, "generator"), (PyCoroObject, "coroutine"),
-                    (PyAsyncGenObject, "async_generator"), (PyCoroWrapper, "coroutine_wrapper")):
-    _cls.__name__ = _cls.__qualname__ = _name
-    _cls.__module__ = "builtins"
-del _cls, _name
 
 
 def PyGen_CheckExact(o) -> bool:
@@ -313,6 +326,9 @@ def gen_send_ex2(gen, arg, exc=None):
         err = e
     tstate.exc_info = prev_exc_info
     gen.gi_exc_state.previous_item = None
+    # A suspended or finished generator frame has no caller (gen_send_ex2 sets
+    # `previous = NULL`); keeping it would tie the generator to its last resumer.
+    frame.previous = None
     if err is not None:
         # The generator frame is cleared when an exception propagates out of it.
         gen.gi_frame_state = FRAME_CLEARED
@@ -653,7 +669,10 @@ def async_gen_unwrap_value(gen, step):
         if isinstance(err, (StopAsyncIteration, GeneratorExit)):
             gen.ag_closed = True
         gen.ag_running_async = False
-        raise err
+        try:
+            raise err
+        finally:
+            err = None
     if _wrapped(result):
         gen.ag_running_async = False
         raise StopIteration(result.agw_val)
@@ -671,6 +690,7 @@ def _warn_unawaited_agen_method(agen, method) -> None:
 class PyAsyncGenASend:
     """async_generator_asend: the awaitable of `__anext__()` / `asend()`."""
     __slots__ = ("ags_gen", "ags_sendval", "ags_state", "__weakref__")
+    __dir__ = _public_dir
 
     def __init__(self, gen, sendval):
         self.ags_gen = gen
@@ -720,7 +740,10 @@ def async_gen_asend_send(o, arg):
         err = e
     if err is not None:
         o.ags_state = AWAITABLE_STATE_CLOSED
-        raise err
+        try:
+            raise err
+        finally:
+            err = None
     return result
 
 
@@ -755,7 +778,10 @@ def async_gen_asend_throw(o, args):
     if err is not None:
         gen.ag_running_async = False
         o.ags_state = AWAITABLE_STATE_CLOSED
-        raise err
+        try:
+            raise err
+        finally:
+            err = None
     return result
 
 
@@ -782,6 +808,7 @@ def async_gen_asend_close(o):
 class PyAsyncGenAThrow:
     """async_generator_athrow: the awaitable of `aclose()` / `athrow()`."""
     __slots__ = ("agt_gen", "agt_typ", "agt_tb", "agt_val", "agt_state", "__weakref__")
+    __dir__ = _public_dir
 
     def __init__(self, gen, args):
         nargs = len(args)
@@ -874,7 +901,10 @@ def async_gen_athrow_send(o, arg):
         # aclose() must not propagate these: StopIteration says the await is done.
         _PyErr_Clear(_PyThreadState_GET())
         raise StopIteration
-    raise err
+    try:
+        raise err
+    finally:
+        err = None
 
 
 def async_gen_athrow_throw(o, args):
@@ -900,7 +930,10 @@ def async_gen_athrow_throw(o, args):
         if err is not None:
             gen.ag_running_async = False
             o.agt_state = AWAITABLE_STATE_CLOSED
-            raise err
+            try:
+                raise err
+            finally:
+                err = None
         return retval
     # aclose() mode
     if err is None and _wrapped(retval):
@@ -914,7 +947,20 @@ def async_gen_athrow_throw(o, args):
     if isinstance(err, (StopAsyncIteration, GeneratorExit)):
         _PyErr_Clear(_PyThreadState_GET())
         raise StopIteration
-    raise err
+    try:
+        raise err
+    finally:
+        err = None
 
 
 register_static_slots(PyAsyncGenASend, am_send=async_gen_asend_am_send)
+
+
+for _cls, _name in ((PyGenObject, "generator"), (PyCoroObject, "coroutine"),
+                    (PyAsyncGenObject, "async_generator"), (PyCoroWrapper, "coroutine_wrapper"),
+                    (PyAsyncGenASend, "async_generator_asend"),
+                    (PyAsyncGenAThrow, "async_generator_athrow"),
+                    (PyAsyncGenWrappedValue, "async_generator_wrapped_value")):
+    _cls.__name__ = _cls.__qualname__ = _name
+    _cls.__module__ = "builtins"
+del _cls, _name

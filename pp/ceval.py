@@ -630,7 +630,11 @@ class VirtualMachine:
                             cur = frame.lasti = instr.offset
                             frame.instr_offset = instr.next_offset
                             if table[instr.opcode](frame, instr) is not None:
-                                return frame.return_value
+                                # Not left behind: RETURN_GENERATOR's value is the generator,
+                                # which owns this frame (a cycle would defer its finalizer).
+                                result = frame.return_value
+                                frame.return_value = None
+                                return result
                     except UnimplementedOpcode:
                         raise
                     except BaseException as e:

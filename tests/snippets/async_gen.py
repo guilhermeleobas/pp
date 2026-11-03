@@ -109,13 +109,27 @@ async def run():
 
 drive(run())
 
-ag = agen(1)
+class Suspend:
+    def __await__(self):
+        yield "suspended"
+
+async def slow():
+    await Suspend()
+    yield 1
+
+ag = slow()
 a1 = ag.__anext__()
+print(a1.send(None), ag.ag_running, ag.ag_await is not None)
+for make in (ag.__anext__, ag.aclose, lambda: ag.athrow(ValueError)):
+    try:
+        make().send(None)
+    except RuntimeError as e:
+        print(e)
 try:
-    ag.__anext__().send(None)
     a1.send(None)
-except RuntimeError as e:
-    print(e)
+except StopIteration as e:
+    print("yielded", e.value)
+print(drive(ag.aclose()), ag.ag_state)
 
 try:
     iter(agen(1))
