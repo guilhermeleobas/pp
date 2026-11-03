@@ -732,12 +732,17 @@ _CRC_32_TAB = _make_crc32_table()
 
 
 def _uint(v):
-    # unsigned_int(bitwise=True): any int, masked to 32 bits.
+    # unsigned_int(bitwise=True): any int, masked to 32 bits; a value outside
+    # [-2**31, 2**32) warns.
     m = getattr(type(v), '__index__', None)
     if m is None:
         raise TypeError(f"'{type(v).__name__}' object cannot be interpreted "
                         "as an integer")
-    return m(v) & _U32
+    v = m(v)
+    if not -(1 << 31) <= v < (1 << 32):
+        import warnings
+        warnings.warn("integer value out of range", DeprecationWarning, 3)
+    return v & _U32
 
 
 def crc_hqx(data, crc, /):
@@ -824,7 +829,7 @@ def b2a_hex(data, /, sep=_NULL, bytes_per_sep=1):
 hexlify = b2a_hex
 
 
-def a2b_hex(hexstr, /, ignorechars=b''):
+def a2b_hex(hexstr, /, *extra, ignorechars=b''):
     """Binary data of hexadecimal representation.
 
       ignorechars
@@ -833,6 +838,27 @@ def a2b_hex(hexstr, /, ignorechars=b''):
     hexstr must contain an even number of hex digits (upper or lower case).
     This function is also available as "unhexlify()".
     """
+    if extra:
+        raise TypeError("a2b_hex() takes exactly 1 positional argument "
+                        f"({1 + len(extra)} given)")
+    return _a2b_hex(hexstr, ignorechars)
+
+
+def unhexlify(hexstr, /, *extra, ignorechars=b''):
+    """Binary data of hexadecimal representation.
+
+      ignorechars
+        A byte string containing characters to ignore from the input.
+
+    hexstr must contain an even number of hex digits (upper or lower case).
+    """
+    if extra:
+        raise TypeError("unhexlify() takes exactly 1 positional argument "
+                        f"({1 + len(extra)} given)")
+    return _a2b_hex(hexstr, ignorechars)
+
+
+def _a2b_hex(hexstr, ignorechars):
     d = _ascii_buf(hexstr)
     ign = _ignorer(_buf(ignorechars))
     out = bytearray()
@@ -859,8 +885,6 @@ def a2b_hex(hexstr, /, ignorechars=b''):
         raise Error("Odd number of hexadecimal digits")
     return bytes(out)
 
-
-unhexlify = a2b_hex
 
 
 # ---- quoted-printable ------------------------------------------------------
@@ -977,3 +1001,10 @@ def b2a_qp(data, quotetabs=False, istext=True, header=False):
                     out.append(c)
                 i += 1
     return bytes(out)
+
+
+def __dir__():
+    # Hide the private helpers: dir(binascii) lists what the C module has.
+    return sorted(n for n in globals()
+                  if not n.startswith('_')
+                  or (n.startswith('__') and n not in ('__builtins__', '__dir__')))

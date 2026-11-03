@@ -5,6 +5,11 @@ modules replaced by their pure-Python versions from pp/lib.
 
 A fast loop for developing a pp/lib stand-in: the pp run is the final check.
 Modules that need the VM itself (gc, _weakref) are out of scope.
+
+Caveat: tests that start a child interpreter (``assert_python_ok`` and friends)
+see the C modules, not the swapped ones. In test_struct those are
+``test_cache_bytes_vs_str_bb`` and ``test_struct_cleans_up_at_runtime_shutdown``;
+test_base64's ``-m base64`` command-line tests do the same.
 """
 
 import argparse
@@ -12,7 +17,6 @@ import importlib.abc
 import importlib.util
 import os
 import sys
-import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PPLIB = os.path.join(ROOT, "pp", "lib")
@@ -32,6 +36,21 @@ class SwapFinder(importlib.abc.MetaPathFinder):
             fullname, os.path.join(PPLIB, fullname + ".py"))
 
 
+# Python wrappers whose name is not the swapped name without its leading "_".
+EXTRA_WRAPPERS = {
+    "binascii": ["base64"],
+    "_sre": ["re"],
+}
+
+
+def wrappers_of(name):
+    """Loaded modules that wrap the swapped C module (struct for _struct, ...)."""
+    base = name.lstrip("_")
+    names = {base} | set(EXTRA_WRAPPERS.get(name, ()))
+    return [m for m in list(sys.modules)
+            if m != name and any(m == w or m.startswith(w + ".") for w in names)]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--swap", default="", help="comma-separated module names served from pp/lib")
@@ -49,6 +68,10 @@ def main():
     # Evict already-imported copies, then make the finder beat BuiltinImporter.
     for n in swap:
         sys.modules.pop(n, None)
+    # Evict the Python wrappers too, so they re-import against the swapped module.
+    for n in swap:
+        for wrapper in wrappers_of(n):
+            sys.modules.pop(wrapper, None)
     sys.meta_path.insert(0, SwapFinder(swap))
 
     for n in swap:
@@ -57,11 +80,8 @@ def main():
         got = getattr(mod, "__file__", None)
         if got is None or os.path.realpath(got) != os.path.realpath(want):
             sys.exit(f"host_test: {n} came from {got!r}, expected {want}")
-    # Drop stdlib modules that cached a C copy before the swap (e.g. struct).
-    for n in ("struct", "binascii", "base64"):
-        if n not in swap:
-            sys.modules.pop(n, None)
 
+    import unittest
     suite = unittest.TestSuite()
     loader = unittest.defaultTestLoader
     for t in args.tests:

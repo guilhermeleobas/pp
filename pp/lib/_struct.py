@@ -42,9 +42,10 @@ its sign); argument-count errors for the module functions are Python's wording
 Argument Clinic wording; ``Struct`` is a plain Python class (instances have
 ``__slots__`` and the format/size attributes are read-only properties) rather
 than an immutable static type; the buffer protocol is reached through
-``memoryview`` so a non-contiguous buffer raises memoryview's ``TypeError``
-rather than ``BufferError``; sizes are those of x86-64 Linux (``long`` is 8
-bytes when ``sys.maxsize`` is 2**63-1, ``_Bool`` and ``short`` 1 and 2).
+``memoryview`` so a non-contiguous buffer raises memoryview's ``BufferError``
+wording; native sizes are those of a Linux LP64 or ILP32 host (``long`` and
+``size_t`` are 8 bytes when ``sys.maxsize`` is 2**63-1, else 4; ``short`` 2,
+``int`` 4, ``_Bool`` 1).
 """
 
 import math as _math
@@ -216,13 +217,25 @@ def _float_entry(fmt, size, align, order, ebits, mbits, name):
     return (fmt, size, align, pack, unpack)
 
 
+def _saturating_bits(x, ebits, mbits, name):
+    # C's (float) cast: out-of-range values become +-inf instead of an error.
+    try:
+        return _pack_bits(x, ebits, mbits, name)
+    except OverflowError:
+        return ((1 << ebits) - 1) << mbits | (
+            1 << (ebits + mbits) if x < 0 else 0)
+
+
 def _complex_entry(fmt, size, align, order, ebits, mbits, name):
     half = size // 2
+    # Tables in native byte order share the native (memcpy of a C float cast)
+    # packer, which saturates; the other byte order goes through PyFloat_Pack4.
+    bits = _saturating_bits if order == _NATIVE_ORDER else _pack_bits
 
     def pack(v):
         c = _as_complex(v)
-        return (_pack_bits(c.real, ebits, mbits, name).to_bytes(half, order)
-                + _pack_bits(c.imag, ebits, mbits, name).to_bytes(half, order))
+        return (bits(c.real, ebits, mbits, name).to_bytes(half, order)
+                + bits(c.imag, ebits, mbits, name).to_bytes(half, order))
 
     def unpack(b):
         return complex(_unpack_bits(int.from_bytes(b[:half], order), ebits, mbits),
@@ -385,6 +398,8 @@ def _readbuf(buffer):
     except TypeError:
         raise TypeError("a bytes-like object is required, not "
                         f"'{type(buffer).__name__}'") from None
+    if not mv.c_contiguous:
+        raise BufferError("memoryview: underlying buffer is not C-contiguous")
     if mv.format != 'B' or mv.ndim != 1:
         mv = mv.cast('B')
     return mv
@@ -397,6 +412,9 @@ def _writebuf(buffer, argno):
         raise _bad_buffer('pack_into', argno, 'read-write bytes-like object',
                           buffer) from None
     if mv.readonly:
+        raise _bad_buffer('pack_into', argno, 'read-write bytes-like object',
+                          buffer)
+    if not mv.c_contiguous:
         raise _bad_buffer('pack_into', argno, 'read-write bytes-like object',
                           buffer)
     if mv.format != 'B' or mv.ndim != 1:
@@ -642,7 +660,7 @@ class Struct(metaclass=_ImmutableType):
         if mv.nbytes % self._size != 0:
             raise error("iterative unpacking requires a buffer of "
                         f"a multiple of {self._size} bytes")
-        return unpack_iterator._make(self, mv)
+        return _unpack_iterator._make(self, mv)
 
     def _pack_internal(self, args, out):
         i = 0
@@ -727,7 +745,7 @@ class Struct(metaclass=_ImmutableType):
         mv[offset:offset + size] = out
 
 
-class unpack_iterator(metaclass=_ImmutableType):
+class _unpack_iterator(metaclass=_ImmutableType):
     __slots__ = ('_so', '_buf', '_index')
 
     def __new__(cls, *args, **kwds):
@@ -762,7 +780,8 @@ class unpack_iterator(metaclass=_ImmutableType):
         return result
 
 
-_frozen.update((Struct, unpack_iterator))
+_unpack_iterator.__name__ = _unpack_iterator.__qualname__ = 'unpack_iterator'
+_frozen.update((Struct, _unpack_iterator))
 
 
 # ---- module-level functions ------------------------------------------------
