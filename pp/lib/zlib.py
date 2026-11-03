@@ -24,7 +24,10 @@ O(window + one 256 KiB segment) per compressor; ``ZLIB_VERSION`` is a fixed
 string; ``Compress``/``Decompress`` are plain classes whose instantiation is
 blocked by ``__new__`` (not immutable static types); a ``compress`` call may
 return less output than libz would at the same point (data is buffered until a
-256 KiB segment is full or ``flush`` is called).
+256 KiB segment is full or ``flush`` is called). After an output-limit stop
+(``max_length``) ``Decompress.unconsumed_tail`` can be one byte longer than libz's:
+libz has already pulled the next symbol's code bits into its state, this decoder
+returns every unread whole byte.
 """
 
 import operator as _operator
@@ -99,7 +102,7 @@ def _buf(data):
         raise TypeError("a bytes-like object is required, not "
                         f"'{type(data).__name__}'") from None
     if not mv.c_contiguous:
-        raise BufferError("Object is not C-contiguous")
+        raise BufferError("memoryview: underlying buffer is not C-contiguous")
     return mv.tobytes()
 
 
@@ -177,7 +180,7 @@ def _adler32_raw(data, value):
     return ((b % 65521) << 16) | (a % 65521)
 
 
-def crc32(data, value=0, /):
+def crc32(data=_NULL, value=0, /):
     """Compute a CRC-32 checksum of data.
 
     value
@@ -185,10 +188,12 @@ def crc32(data, value=0, /):
 
     The returned checksum is an integer.
     """
+    if data is _NULL:
+        raise TypeError("crc32 expected at least 1 argument, got 0")
     return _crc32_raw(_buf(data), _uint(value))
 
 
-def adler32(data, value=1, /):
+def adler32(data=_NULL, value=1, /):
     """Compute an Adler-32 checksum of data.
 
     value
@@ -196,7 +201,15 @@ def adler32(data, value=1, /):
 
     The returned checksum is an integer.
     """
+    if data is _NULL:
+        raise TypeError("adler32 expected at least 1 argument, got 0")
     return _adler32_raw(_buf(data), _uint(value))
+
+
+def _nargs(name, *args):
+    got = sum(1 for a in args if a is not _NULL)
+    if got != 3:
+        raise TypeError(f"{name} expected 3 arguments, got {got}")
 
 
 def _len2(len2):
@@ -206,7 +219,7 @@ def _len2(len2):
     if not -(1 << 63) <= len2 < (1 << 63):
         raise OverflowError("Python int too large to convert to C ssize_t")
     if len2 < 0:
-        raise ValueError("len2 cannot be negative")
+        raise ValueError("len2 must be non-negative")
     return len2
 
 
@@ -225,7 +238,7 @@ def _gf2_square(mat):
     return [_gf2_times(mat, mat[n]) for n in range(32)]
 
 
-def crc32_combine(crc1, crc2, len2, /):
+def crc32_combine(a=_NULL, b=_NULL, len2=_NULL, /):
     """Combine two CRC-32 checksums into one.
 
     crc1
@@ -239,8 +252,9 @@ def crc32_combine(crc1, crc2, len2, /):
     CRC-32 checksum 'crc2' of a sequence B of length 'len2',
     return the CRC-32 checksum of A and B concatenated.
     """
-    crc1 = _uint(crc1)
-    crc2 = _uint(crc2)
+    _nargs('crc32_combine', a, b, len2)
+    crc1 = _uint(a)
+    crc2 = _uint(b)
     len2 = _len2(len2)
     if len2 == 0:
         return crc1
@@ -263,7 +277,7 @@ def crc32_combine(crc1, crc2, len2, /):
     return crc1 ^ crc2
 
 
-def adler32_combine(adler1, adler2, len2, /):
+def adler32_combine(a=_NULL, b=_NULL, len2=_NULL, /):
     """Combine two Adler-32 checksums into one.
 
     adler1
@@ -277,8 +291,9 @@ def adler32_combine(adler1, adler2, len2, /):
     Adler-32 checksum 'adler2' of a sequence B of length 'len2',
     return the Adler-32 checksum of A and B concatenated.
     """
-    adler1 = _uint(adler1)
-    adler2 = _uint(adler2)
+    _nargs('adler32_combine', a, b, len2)
+    adler1 = _uint(a)
+    adler2 = _uint(b)
     len2 = _len2(len2)
     base = 65521
     rem = len2 % base
@@ -1453,7 +1468,7 @@ def _deflate_params(level, method, wbits, memlevel, strategy):
 
 # --- module functions ---------------------------------------------------
 
-def compress(data, /, level=Z_DEFAULT_COMPRESSION, wbits=MAX_WBITS):
+def compress(data=_NULL, /, level=Z_DEFAULT_COMPRESSION, wbits=MAX_WBITS):
     """Returns a bytes object containing compressed data.
 
     data
@@ -1463,6 +1478,8 @@ def compress(data, /, level=Z_DEFAULT_COMPRESSION, wbits=MAX_WBITS):
     wbits
       The window buffer size and container format.
     """
+    if data is _NULL:
+        raise TypeError("compress() takes at least 1 positional argument (0 given)")
     data = _buf(data)
     level = _cint(level)
     wbits = _cint(wbits)
@@ -1475,7 +1492,7 @@ def compress(data, /, level=Z_DEFAULT_COMPRESSION, wbits=MAX_WBITS):
     return d.feed(data) + d.flush(Z_FINISH)
 
 
-def decompress(data, /, wbits=MAX_WBITS, bufsize=DEF_BUF_SIZE):
+def decompress(data=_NULL, /, wbits=MAX_WBITS, bufsize=DEF_BUF_SIZE):
     """Returns a bytes object containing the uncompressed data.
 
     data
@@ -1485,6 +1502,8 @@ def decompress(data, /, wbits=MAX_WBITS, bufsize=DEF_BUF_SIZE):
     bufsize
       The initial output buffer size.
     """
+    if data is _NULL:
+        raise TypeError("decompress() takes at least 1 positional argument (0 given)")
     data = _buf(data)
     wbits = _cint(wbits)
     bufsize = _ssize(bufsize)
@@ -1506,7 +1525,7 @@ def decompress(data, /, wbits=MAX_WBITS, bufsize=DEF_BUF_SIZE):
     return out
 
 
-class Compress:
+class _Compress:
     """Compression object (returned by ``compressobj``)."""
 
     def __new__(cls, *args, **kwargs):
@@ -1547,7 +1566,7 @@ class Compress:
         """Return a copy of the compression object."""
         if self._d.finished:
             raise ValueError("Inconsistent stream state")
-        new = object.__new__(Compress)
+        new = object.__new__(_Compress)
         new._d = self._d.clone()
         return new
 
@@ -1561,7 +1580,7 @@ class Compress:
         raise TypeError("cannot pickle 'zlib.Compress' object")
 
 
-class Decompress:
+class _Decompress:
     """Decompression object (returned by ``decompressobj``)."""
 
     def __new__(cls, *args, **kwargs):
@@ -1659,7 +1678,7 @@ class Decompress:
         """Return a copy of the decompression object."""
         if not self._init:
             raise ValueError("Inconsistent stream state")
-        new = object.__new__(Decompress)
+        new = object.__new__(_Decompress)
         new.__dict__.update(self.__dict__)
         new._inf = self._inf.clone()
         return new
@@ -1674,7 +1693,9 @@ class Decompress:
         raise TypeError("cannot pickle 'zlib.Decompress' object")
 
 
-Compress.__module__ = Decompress.__module__ = 'zlib'
+_Compress.__module__ = _Decompress.__module__ = 'zlib'
+_Compress.__name__ = _Compress.__qualname__ = 'Compress'
+_Decompress.__name__ = _Decompress.__qualname__ = 'Decompress'
 
 
 def compressobj(level=Z_DEFAULT_COMPRESSION, method=DEFLATED, wbits=MAX_WBITS,
@@ -1715,7 +1736,7 @@ def compressobj(level=Z_DEFAULT_COMPRESSION, method=DEFLATED, wbits=MAX_WBITS,
     if params is None:
         raise ValueError("Invalid initialization option")
     level, wrap, wb = params
-    self = object.__new__(Compress)
+    self = object.__new__(_Compress)
     self._d = _Deflate(level, wrap, wb, memLevel, strategy)
     if zdict is not None:
         try:
@@ -1743,7 +1764,7 @@ def decompressobj(wbits=MAX_WBITS, zdict=_NULL):
                 from None
     else:
         zdict = None
-    self = object.__new__(Decompress)
+    self = object.__new__(_Decompress)
     self._zdict = zdict
     self._unused_data = b''
     self._unconsumed_tail = b''
@@ -1875,3 +1896,10 @@ def __getattr__(name):
                       "Python 3.20", DeprecationWarning, stacklevel=2)
         return '1.0'
     raise AttributeError(f"module 'zlib' has no attribute {name!r}")
+
+
+def __dir__():
+    # Hide the private helpers: dir(zlib) lists what the C module has.
+    return sorted(n for n in globals()
+                  if not n.startswith('_') or n == '_ZlibDecompressor'
+                  or (n.startswith('__') and n not in ('__builtins__', '__dir__')))
