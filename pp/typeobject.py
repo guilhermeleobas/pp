@@ -65,6 +65,9 @@ _SLOTDEF_SPECS = (
     ("tp_richcompare", "__ge__", "slot_tp_richcompare", None),
     ("tp_iter", "__iter__", "slot_tp_iter", None),
     ("tp_iternext", "__next__", "slot_tp_iternext", None),
+    ("am_await", "__await__", "slot_am_await", None),
+    ("am_aiter", "__aiter__", "slot_am_aiter", None),
+    ("am_anext", "__anext__", "slot_am_anext", None),
     ("tp_descr_get", "__get__", "slot_tp_descr_get", None),
     ("tp_descr_set", "__set__", "slot_tp_descr_set", None),
     ("tp_descr_set", "__delete__", "slot_tp_descr_set", None),
@@ -717,6 +720,9 @@ _ADAPTERS = {
     "tp_richcompare": _richcompare_adapter,
     "tp_iter": _unary_adapter,
     "tp_iternext": _unary_adapter,
+    "am_await": _unary_adapter,
+    "am_aiter": _unary_adapter,
+    "am_anext": _unary_adapter,
     "tp_descr_get": _descr_get_adapter,
     "tp_descr_set": _setter_deleter_adapter("__set__", "__delete__"),
     "sq_length": _unary_adapter,
@@ -1117,6 +1123,25 @@ def slot_tp_iternext(self):
     return vectorcall_method("__next__", (self,))
 
 
+def _slot_am_generic(self, name):
+    res, _ = maybe_call_special_no_args(self, name, False)
+    if res is NULL:
+        raise AttributeError(f"object {Py_TYPE(self).tp_name[:50]} does not have {name} method")
+    return res
+
+
+def slot_am_await(self):
+    return _slot_am_generic(self, "__await__")
+
+
+def slot_am_aiter(self):
+    return _slot_am_generic(self, "__aiter__")
+
+
+def slot_am_anext(self):
+    return _slot_am_generic(self, "__anext__")
+
+
 def slot_tp_descr_get(self, obj, type_):
     tp = Py_TYPE(self)
     get = _PyType_Lookup(type(self), "__get__")
@@ -1141,7 +1166,8 @@ def slot_tp_descr_set(self, target, value):
 
 _GENERIC = {None: None}
 for _n in ("slot_tp_getattr_hook", "slot_tp_setattro", "slot_tp_call", "slot_tp_richcompare",
-           "slot_tp_iter", "slot_tp_iternext", "slot_tp_descr_get", "slot_tp_descr_set",
+           "slot_tp_iter", "slot_tp_iternext", "slot_am_await", "slot_am_aiter",
+           "slot_am_anext", "slot_tp_descr_get", "slot_tp_descr_set",
            "slot_sq_length", "slot_sq_item", "slot_sq_ass_item", "slot_sq_contains", "slot_mp_subscript",
            "slot_mp_ass_subscript", "slot_nb_add", "slot_nb_subtract", "slot_nb_multiply",
            "slot_nb_remainder", "slot_nb_power", "slot_nb_negative", "slot_nb_positive",

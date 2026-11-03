@@ -42,13 +42,15 @@ LOAD_SPECIAL IMPORT_NAME IMPORT_FROM GET_LEN MATCH_CLASS MATCH_MAPPING
 MATCH_SEQUENCE MATCH_KEYS DICT_MERGE BUILD_TEMPLATE BUILD_INTERPOLATION
 """.split()) | {op for op in dis.opmap
                 if op.startswith(("LOAD_FAST", "STORE_FAST")) and op != "STORE_FAST_MAYBE_NULL"}
-SUPPORTED = MILESTONE_1 | MILESTONE_2
+# Async/coroutine opcodes (SEND, END_SEND, CLEANUP_THROW and the intrinsic are above).
+MILESTONE_ASYNC = frozenset("""
+GET_AWAITABLE GET_AITER GET_ANEXT END_ASYNC_FOR
+""".split())
+SUPPORTED = MILESTONE_1 | MILESTONE_2 | MILESTONE_ASYNC
 
 # Snippets expected to need features beyond Milestone 2 (feature name).
 # Cross-checked against `dis` by test_scope_table.
-OUT_OF_SCOPE = {
-    "xfail_async": "async def / await",
-}
+OUT_OF_SCOPE: dict = {}
 
 
 def missing_opcodes(src, filename):
@@ -161,11 +163,7 @@ def test_exceptions_not_wrapped():
 
 def test_unimplemented_opcode():
     assert issubclass(pp.errors.UnimplementedOpcode, NotImplementedError)
-    src = "x = 1\nasync def f():\n    await x\nf().send(None)\n"
-    assert "GET_AWAITABLE" in missing_opcodes(src, "<s>")
-    with pytest.raises(pp.errors.UnimplementedOpcode) as ei:
-        pp.run_source(src)
-    assert "GET_AWAITABLE" in str(ei.value)
+    assert "GET_AWAITABLE" in str(pp.errors.UnimplementedOpcode("GET_AWAITABLE"))
 
 
 def test_globals_without_builtins_gets_them():

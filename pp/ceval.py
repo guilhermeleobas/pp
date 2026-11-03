@@ -36,7 +36,9 @@ from pp.errors import (PyErr_GivenExceptionMatches, PyExceptionClass_Check, PyTh
                        _PyErr_SetRaisedException, _PyThreadState_Swap)
 from pp.frame import NULL, Frame  # noqa: F401  (NULL is part of the pp.vm API)
 from pp.funcobject import Function, PyFunction_New, bind_arguments, builtins_from_globals
-from pp.genobject import PyAsyncGenObject, PyCoroObject, PyGenObject
+from pp.genobject import (FRAME_SUSPENDED_YIELD_FROM, FRAME_SUSPENDED_YIELD_FROM_LOCKED,
+                          PyAsyncGenObject, PyAsyncGenWrappedValue, PyCoro_CheckExact, PyCoro_GetAwaitableIter,
+                          PyCoroObject, PyGenObject, gen_is_coroutine)
 
 _GenericGetAttr = _obj.PyObject_GenericGetAttr
 _GenericSetAttr = _obj.PyObject_GenericSetAttr
@@ -475,6 +477,42 @@ def _match_keys(subject, keys):
             return None
         values.append(v)
     return tuple(values)
+
+
+def _PyEval_GetAwaitable(iterable, oparg):
+    tp = PyType_View(type(iterable))
+    if tp.am_await is None and not gen_is_coroutine(iterable):
+        if oparg == 1:
+            raise TypeError("'async with' received an object from __aenter__ that does not "
+                            f"implement __await__: {tp.tp_name[:100]}")
+        if oparg == 2:
+            raise TypeError("'async with' received an object from __aexit__ that does not "
+                            f"implement __await__: {tp.tp_name[:100]}")
+    it = PyCoro_GetAwaitableIter(iterable)
+    if PyCoro_CheckExact(it) and it.gi_frame_state in (FRAME_SUSPENDED_YIELD_FROM,
+                                                       FRAME_SUSPENDED_YIELD_FROM_LOCKED):
+        raise RuntimeError("coroutine is being awaited already")
+    return it
+
+
+def _PyEval_GetANext(aiter):
+    tp = PyType_View(type(aiter))
+    if type(aiter) is PyAsyncGenObject:
+        return tp.am_anext(aiter)
+    getter = tp.am_anext
+    if getter is None:
+        raise TypeError("'async for' requires an iterator with __anext__ method, "
+                        f"got {tp.tp_name[:100]}")
+    next_iter = getter(aiter)
+    err = None
+    try:
+        return PyCoro_GetAwaitableIter(next_iter)
+    except TypeError as e:
+        err = e
+    new = TypeError("'async for' received an invalid object from __anext__: "
+                    f"{PyType_View(type(next_iter)).tp_name[:100]}")
+    new.__cause__ = err
+    raise new
 
 
 class VirtualMachine:
@@ -995,6 +1033,35 @@ class VirtualMachine:
         f.stack.append(None)
         f.stack.append(null)
         f.stack.append(exc_value.value)
+
+    # --- coroutines (async def / await / async for / async with) ---
+
+    def GET_AWAITABLE(self, f, i):
+        f.stack.append(_PyEval_GetAwaitable(f.stack.pop(), i.arg))
+
+    def GET_AITER(self, f, i):
+        obj = f.stack.pop()
+        tp = PyType_View(type(obj))
+        getter = tp.am_aiter
+        if getter is None:
+            raise TypeError("'async for' requires an object with __aiter__ method, "
+                            f"got {tp.tp_name[:100]}")
+        it = getter(obj)
+        it_tp = PyType_View(type(it))
+        if it_tp.am_anext is None:
+            raise TypeError("'async for' received an object from __aiter__ that does not "
+                            f"implement __anext__: {it_tp.tp_name[:100]}")
+        f.stack.append(it)
+
+    def GET_ANEXT(self, f, i):
+        f.stack.append(_PyEval_GetANext(f.stack[-1]))
+
+    def END_ASYNC_FOR(self, f, i):
+        exc = f.stack.pop()
+        f.stack.pop()            # awaitable
+        if not PyErr_GivenExceptionMatches(exc, StopAsyncIteration):
+            _PyErr_SetRaisedException(self.tstate, exc)
+            raise exc
 
     # --- exceptions ---
 
@@ -1533,7 +1600,7 @@ class VirtualMachine:
         _intrinsic_print,
         _intrinsic_import_star,
         _intrinsic_stopiteration_error,
-        lambda self, f, v: v,                 # INTRINSIC_ASYNC_GEN_WRAP (async: out of scope)
+        lambda self, f, v: PyAsyncGenWrappedValue(v),   # INTRINSIC_ASYNC_GEN_WRAP
         lambda self, f, v: PyNumber_Positive(v),   # INTRINSIC_UNARY_POSITIVE
         lambda self, f, v: tuple(v),          # INTRINSIC_LIST_TO_TUPLE (v is always a list)
         _intrinsic_typevar,
