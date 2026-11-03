@@ -6,7 +6,8 @@ Blocked work is retried once its blocker is resolved.
 
 | Blocker | Blocks | Found | Status |
 |---|---|---|---|
-| `async` opcodes (GET_AWAITABLE, GET_AITER, GET_ANEXT, END_ASYNC_FOR) not implemented | `collections` and `unittest` CPython tests (test.support imports asyncio), any async code | 2026-11-01 | open |
+| `async` opcodes (GET_AWAITABLE, GET_AITER, GET_ANEXT, END_ASYNC_FOR) not implemented | `collections` and `unittest` CPython tests (test.support imports asyncio), any async code | 2026-11-01 | done on `impl/async` (limitations below) |
+| Async limitations: `cr_origin` is always `None` (`sys.set_coroutine_origin_tracking_depth` is not modeled); unawaited-coroutine and finalizer errors in `__del__` are swallowed instead of printed as unraisable; async generator and coroutine finalization follows host refcounting, which pp's frame/generator cycles delay until the host GC runs | asyncio debug mode, `test_coroutines`/`test_asyncgen` timing tests | 2026-11-03 | open |
 | Milestone 3 made pp ~2x slower (slot dispatch overhead); `difflib` now times out. Perf work on Fable/Opus, after `impl/m3-fixes` merges | `difflib`, `itertools`, gate run time | 2026-11-02 | open |
 | `itertools` CPython test exceeds the 600s timeout under pp | `itertools` row on the dashboard | 2026-11-01 | open |
 | `types` test: `_datetime` now exists (`pp/lib/_datetime.py` re-exports `_pydatetime`); `test_capsule_type` needs the C capsule `datetime_CAPI` and stays failing. Run is blocked on async | `types` CPython test | 2026-11-01 | `_datetime` done; async open |
