@@ -66,6 +66,10 @@ downloads CPython's `Lib/` at tag v3.15.2 into `vendor/`. Always use that tag.
   the reason.
 - To run one module: `pixi run python -m pp run tools/run_unittest.py
   test.test_X`, with `PYTHONPATH=<worktree>:<worktree>/vendor/cpython-3.15.2/Lib`.
+- **Iterate on host** with `tools/host_test.py`; the pp run is the final check.
+  `pixi run python tools/host_test.py --swap _struct,binascii test.test_struct`
+  runs a CPython test module on plain host CPython with the named C modules
+  replaced by their `pp/lib` versions.
 - Performance work needs before/after timings for every change.
 
 ## Commits and branches
