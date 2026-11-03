@@ -17,6 +17,8 @@ Branches below are pushed to GitHub.
   CPython-style method cache, warnings through the guest `warnings` module.
 - Pure-Python `_sre` (explicit-stack matcher, `re` entirely in Python) and
   accelerator stand-ins `_bisect`, `_datetime`, `_json`, `_csv`.
+- Pure-Python `zlib` (inflate and deflate; compressed bytes differ from
+  libz but always round-trip).
 - Pure-Python `_random` (Mersenne Twister, bit-identical to CPython).
 - Pure-Python `_struct` and `binascii`, and `tools/host_test.py`: runs
   CPython's Lib/test on host CPython with C modules swapped for their
@@ -32,9 +34,7 @@ Branches below are pushed to GitHub.
 
 ## In progress
 
-| Branch | What | Status |
-|---|---|---|
-| `impl/zlib` | Pure-Python `zlib` | in progress |
+Nothing from this orchestrator; see the claims (`tools/claim.sh list`).
 
 ## Next
 
@@ -46,7 +46,7 @@ Branches below are pushed to GitHub.
 3. **Layout**: split `pp/` into `pp/vm/` (host code) and `pp/lib/` (guest
    code) once in-flight branches have merged.
 4. **Remaining C modules → `pp/lib`** (one branch each):
-   `_contextvars`, `zlib`, `unicodedata`,
+   `_contextvars`, `unicodedata`,
    `_locale`, `_typing`, `_codecs`, plus accelerator stand-ins `_pickle` and
    `_hashlib`. Iterate with `tools/host_test.py --swap <mod>`. Then a pp-native t-string
    `Template`/`Interpolation`.
@@ -73,7 +73,6 @@ replacements live in `pp/lib/`. Already reimplemented: `_collections`,
 | Module | Used by | Status |
 |---|---|---|
 | `_contextvars` | `contextvars`, `asyncio`, `decimal` | |
-| `zlib` | `gzip`, `zipfile` | |
 | `unicodedata` | `unicodedata`, normalization in `str` helpers | |
 | `_locale` | `locale` | |
 | `select`, `fcntl`, `_posixsubprocess`, `_socket`, `resource`, `faulthandler` | `subprocess`, `socket`, `test.support` | OS access; may move to the permanent boundary |
@@ -90,7 +89,7 @@ pure Python), plus `sys` and `builtins`, which the VM serves itself.
 | Area | Modules | Blocks |
 |---|---|---|
 | Hashing | `_hashlib`, `_md5`, `_sha1`, `_sha2`, `_sha3`, `_blake2`, `_hmac` | `hashlib`, `hmac`, `secrets`, `random` seeding by bytes |
-| Compression | `_bz2`, `_lzma`, `_zstd` (and borrowed `zlib`) | `bz2`, `lzma`, `compression.zstd`, `tarfile`, `zipfile` |
+| Compression | `_bz2`, `_lzma`, `_zstd` | `bz2`, `lzma`, `compression.zstd`, `tarfile`, `zipfile` |
 | XML | `pyexpat`, `_elementtree` (Python fallback exists) | `xml.parsers.expat`, `xml.dom.minidom`, `plistlib` |
 | Numbers | `cmath`, `_decimal` (Python fallback `_pydecimal` exists), `_statistics` (fallback exists) | `cmath` |
 | CJK codecs | `_multibytecodec`, `_codecs_cn`, `_codecs_hk`, `_codecs_iso2022`, `_codecs_jp`, `_codecs_kr`, `_codecs_tw` | those encodings |

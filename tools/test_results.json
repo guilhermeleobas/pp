@@ -237,6 +237,15 @@
   "skipped": 0,
   "total": 17
  },
+ "gzip": {
+  "detail": "FAILED (failures=1)",
+  "errors": 0,
+  "failures": 1,
+  "passed": 77,
+  "result": "partial",
+  "skipped": 0,
+  "total": 78
+ },
  "heapq": {
   "detail": "FAILED (failures=2, skipped=34)",
   "errors": 0,
@@ -469,5 +478,14 @@
   "result": "partial",
   "skipped": 2,
   "total": 140
+ },
+ "zlib": {
+  "detail": "OK (skipped=2)",
+  "errors": 0,
+  "failures": 0,
+  "passed": 86,
+  "result": "partial",
+  "skipped": 2,
+  "total": 88
  }
 }

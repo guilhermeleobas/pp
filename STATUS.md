@@ -6,15 +6,15 @@ A module counts as **pass** when its CPython test file runs to completion under 
 (`python -m pp run tools/run_unittest.py test.test_<module>`). The test file and every pure-Python module it
 imports run in the VM; C modules come from the host only if listed in `pp/importer.py`.
 
-Host C modules still borrowed: 10 temporary (to replace with Python), 16 permanent (host boundary).
+Host C modules still borrowed: 9 temporary (to replace with Python), 16 permanent (host boundary).
 
-Temporary: `_contextvars`, `_locale`, `_posixsubprocess`, `_socket`, `faulthandler`, `fcntl`, `resource`, `select`, `unicodedata`, `zlib`
+Temporary: `_contextvars`, `_locale`, `_posixsubprocess`, `_socket`, `faulthandler`, `fcntl`, `resource`, `select`, `unicodedata`
 
 ## Summary
 
 | Result | Modules |
 |---|---|
-| partial | 31 |
+| partial | 33 |
 | pass | 13 |
 | blocked | 4 |
 | timeout | 3 |
@@ -22,9 +22,9 @@ Temporary: `_contextvars`, `_locale`, `_posixsubprocess`, `_socket`, `faulthandl
 
 | Kind | Modules | What pp needs |
 |---|---|---|
-| Python | 31 | run the `.py` source through the VM |
+| Python | 32 | run the `.py` source through the VM |
 | Python + C helper | 19 | use its Python fallback if it has one, else reimplement the `_<name>` C helper |
-| C only | 4 | reimplement in Python under `pp/lib/` |
+| C only | 5 | reimplement in Python under `pp/lib/` |
 
 ## Top blockers
 
@@ -90,3 +90,5 @@ Temporary: `_contextvars`, `_locale`, `_posixsubprocess`, `_socket`, `faulthandl
 | 4 | gc | C only | test/test_gc.py | partial | `███░░░░░░░` 31% 19/61 | collect() frees nothing; object enumeration is empty (see pp/lib/gc.py) | FAILED (failures=33, errors=1, skipped=8) |
 | 4 | struct | Python + C helper | test/test_struct.py | partial | `█████████░` 91% 43/47 |  | FAILED (failures=1, skipped=3) |
 | 4 | binascii | C only | test/test_binascii.py | partial | `█████████░` 92% 220/237 |  | OK (skipped=17) |
+| 4 | zlib | C only | test/test_zlib.py | partial | `██████████` 97% 86/88 |  | OK (skipped=2) |
+| 4 | gzip | Python | test/test_gzip.py | partial | `██████████` 98% 77/78 |  | FAILED (failures=1) |
