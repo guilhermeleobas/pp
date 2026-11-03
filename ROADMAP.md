@@ -33,8 +33,8 @@ Branches below are pushed to GitHub.
 
 | Branch | What | Status |
 |---|---|---|
-| `impl/math` | Pure-Python `math` and `cmath` | in progress |
-| `impl/random-string` | Pure-Python `_random` and `_string` | in progress |
+| `impl/hashing` | Pure-Python `_md5`, `_sha1`, `_sha2`, `_sha3`, `_blake2` | in progress |
+| `impl/random-string` | Pure-Python `_random` | in progress |
 | `impl/zlib` | Pure-Python `zlib` | in progress |
 
 ## Next
