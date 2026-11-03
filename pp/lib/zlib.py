@@ -903,10 +903,11 @@ _FIXED_LCODE = _codes(_FIXED_LIT_LENS)
 _FIXED_DCODE = _codes([5] * 30)
 _FIXED_DLEN = [5] * 30
 
-# per level: (max chain, nice length, lazy matching)
-_CONFIG = (None, (4, 8, False), (8, 16, False), (32, 32, False),
-           (16, 16, True), (32, 32, True), (64, 128, True), (128, 128, True),
-           (256, 258, True), (256, 258, True))
+# per level: (max chain, nice length, lazy matching, only from level 7); chains are much shorter
+# than libz's because every candidate costs interpreted bytecode
+_CONFIG = (None, (2, 8, False), (3, 16, False), (4, 32, False),
+           (4, 16, False), (6, 32, False), (8, 64, False), (16, 128, True),
+           (32, 258, True), (64, 258, True))
 
 
 def _huff_lens(freq, limit):

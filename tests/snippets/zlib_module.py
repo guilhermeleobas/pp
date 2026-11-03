@@ -59,3 +59,6 @@ for i in range(0, len(comp), 10):
     out += zd.decompress(comp[i:i + 10])
 print(out == text, zd.eof, zd.needs_input)
 t(zd.decompress, b"more")
+
+# compressed bytes differ from libz: keep them out of the compared globals
+del c, cd, comp, raw, co
