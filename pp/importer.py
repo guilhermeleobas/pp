@@ -46,7 +46,6 @@ PP_BUILTIN_MODULES = frozenset({"_warnings"})
 # Temporary: C modules we intend to replace with pure Python (pp/lib). Each
 # entry is tracked debt.
 HOST_MODULES_TEMPORARY = frozenset({
-    "math",
     "_contextvars",
     "zlib",
     "unicodedata",
