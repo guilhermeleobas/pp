@@ -46,7 +46,7 @@ Branches below are pushed to GitHub.
 3. **Layout**: split `pp/` into `pp/vm/` (host code) and `pp/lib/` (guest
    code) once in-flight branches have merged.
 4. **Remaining C modules → `pp/lib`** (one branch each): `math`,
-   `_string`, `_contextvars`, `zlib`, `unicodedata`,
+   `_contextvars`, `zlib`, `unicodedata`,
    `_locale`, `_typing`, `_codecs`, plus accelerator stand-ins `_pickle` and
    `_hashlib`. Iterate with `tools/host_test.py --swap <mod>`. Then a pp-native t-string
    `Template`/`Interpolation`.
@@ -64,7 +64,7 @@ What pp does not yet provide in pure Python, against Python 3.15's
 `sys.stdlib_module_names`. The importer is in `pp/importer.py`; pure-Python
 replacements live in `pp/lib/`. Already reimplemented: `_collections`,
 `array`, `_weakref`, `gc`, `itertools`, `_sre`, `_bisect`, `_datetime`,
-`_json`, `_csv`, `_struct`, `binascii`, `_random`.
+`_json`, `_csv`, `_struct`, `binascii`, `_random`, `_string`.
 
 ### C modules still borrowed from the host (to reimplement)
 
@@ -73,7 +73,6 @@ replacements live in `pp/lib/`. Already reimplemented: `_collections`,
 | Module | Used by | Status |
 |---|---|---|
 | `math` | `fractions`, `statistics`, `random`, `decimal`, ... | |
-| `_string` | `string.Formatter` | |
 | `_contextvars` | `contextvars`, `asyncio`, `decimal` | |
 | `zlib` | `gzip`, `zipfile` | |
 | `unicodedata` | `unicodedata`, normalization in `str` helpers | |
