@@ -842,6 +842,12 @@ class _Inflate:
                     need = 0
                     if self.wrap:
                         need = 8 if self.gz else 4
+                    if self.gz and dlen - pos >= 4:
+                        # libz checks the CRC as soon as its 4 bytes are in
+                        self._upd(win, checked)
+                        checked = len(win)
+                        if frombytes(data[pos:pos + 4], 'little') != self.check:
+                            raise _ZError(-3, 'incorrect data check')
                     if dlen - pos < need:
                         status = 'ok'
                         break

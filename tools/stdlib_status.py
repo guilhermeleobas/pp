@@ -22,6 +22,9 @@ STATUS = os.path.join(ROOT, "STATUS.md")
 TEMPLATE = os.path.join(ROOT, "tools", "dashboard_template.html")
 DASHBOARD = os.path.join(ROOT, "docs", "dashboard.html")
 TIMEOUT = 600
+# Per-module overrides (seconds). zlib and gzip compress real data with the
+# pure-Python deflate in pp/lib/zlib.py: ~730s and ~680s under pp.
+TIMEOUTS = {"zlib": 1200, "gzip": 1200}
 
 # Modules tracked by STATUS.md and the dashboard, mapped to their tier (the order we
 # plan to support them in). Tiers follow what `unittest` needs to run under pp.
@@ -91,14 +94,15 @@ def classify():
 
 def run_test(row):
     module = "test." + os.path.basename(row["test"]).removesuffix(".py")
+    timeout = TIMEOUTS.get(row["module"], TIMEOUT)
     env = dict(os.environ, PYTHONPATH=os.pathsep.join([ROOT, LIB]))
     try:
         proc = subprocess.run(
             [sys.executable, "-m", "pp", "run", os.path.join(ROOT, "tools", "run_unittest.py"), module],
-            capture_output=True, text=True, timeout=TIMEOUT, cwd=ROOT, env=env,
+            capture_output=True, text=True, timeout=timeout, cwd=ROOT, env=env,
         )
     except subprocess.TimeoutExpired:
-        return {"result": "timeout", "detail": f">{TIMEOUT}s"}
+        return {"result": "timeout", "detail": f">{timeout}s"}
     out = proc.stdout + proc.stderr
     counts = unittest_counts(out)
     passed, total = counts["passed"], counts["total"]

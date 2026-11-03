@@ -60,5 +60,12 @@ for i in range(0, len(comp), 10):
 print(out == text, zd.eof, zd.needs_input)
 t(zd.decompress, b"more")
 
+# a bad gzip CRC is reported as soon as its 4 bytes arrive
+good = zlib.compress(b"hello gzip", 6, 31)
+bad = good[:-8] + good[-7:]
+t(zlib.decompress, bad, 31)
+t(zlib.decompressobj(31).decompress, bad)
+t(zlib.decompressobj(31).decompress, good[:-4])
+
 # compressed bytes differ from libz: keep them out of the compared globals
-del c, cd, comp, raw, co
+del c, cd, comp, raw, co, good, bad
