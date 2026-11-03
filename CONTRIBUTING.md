@@ -20,6 +20,26 @@ Your brief names your role, branch and scope. Stay inside that scope. If the
 brief and these documents disagree, follow the brief and say so in your
 report.
 
+## Claim before you start
+
+Several agents work at once. Before starting an item, claim it:
+
+```bash
+tools/claim.sh list                                 # what is taken
+tools/claim.sh claim _pickle impl/pickle "pure-Python _pickle"
+```
+
+- If `claim` fails, the item is taken: pick another one. Never work on a
+  claimed item.
+- One item is a module (`_pickle`, `math`) or a task slug (`sre-pos`,
+  `perf-eval-loop`). Claim the narrowest item that covers your work.
+- Run `tools/claim.sh release <item>` when your branch is merged or you drop
+  the work.
+- A claim older than 6 hours whose branch has no new commits is stale. Tell
+  the orchestrator before you take it over.
+- Claims live in `$PP_CLAIMS_DIR` (default `~/pp-claims`) on the shared
+  machine, outside the repository. Never commit them.
+
 ## Setup
 
 ```bash
