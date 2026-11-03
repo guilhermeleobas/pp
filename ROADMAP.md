@@ -17,11 +17,14 @@ Branches below are pushed to GitHub.
   CPython-style method cache, warnings through the guest `warnings` module.
 - Pure-Python `_sre` (explicit-stack matcher, `re` entirely in Python) and
   accelerator stand-ins `_bisect`, `_datetime`, `_json`, `_csv`.
+- Pure-Python `_struct` and `binascii`, and `tools/host_test.py`: runs
+  CPython's Lib/test on host CPython with C modules swapped for their
+  `pp/lib` versions (the fast loop for C-module work).
 - Host-boundary import guard test (`tests/test_host_boundary.py`).
 - Pure-Python `_collections` (deque, defaultdict, OrderedDict), `array`,
   `_weakref` and `gc` in `pp/lib` (weak refs never die; `gc.collect()` frees
   nothing; see BLOCKERS.md).
-- Stdlib tracking: tiers 1–4 (49 modules) validated by CPython's Lib/test at
+- Stdlib tracking: tiers 1–4 (54 modules) validated by CPython's Lib/test at
   tag v3.15.2, dashboard in `docs/dashboard.html`.
 - Design rule: C modules are reimplemented in Python, limitations accepted
   (DESIGN.md, "C modules: reimplement, don't borrow").
@@ -30,22 +33,21 @@ Branches below are pushed to GitHub.
 
 | Branch | What | Status |
 |---|---|---|
-| `perf/eval-loop` | Interpreter loop and slot dispatch speed (Opus) | in progress |
+| `impl/async` | Async opcodes, coroutine and async-generator objects | judge: FIX (hide VM state, flat MRO) |
 
 ## Next
 
-1. **Performance** of the interpreter loop (in progress, `perf/eval-loop`):
+1. **Performance** of the interpreter loop (first attempt not merged):
    the milestone 3 ~2× slowdown and the `difflib`, `itertools`, `datetime`,
    `statistics` timeouts.
-2. **Async opcodes** (GET_AWAITABLE, GET_AITER, GET_ANEXT, END_ASYNC_FOR):
-   unblocks `unittest`, `collections`, `contextlib`, `types` and everything
+2. **Async opcodes** (in review, `impl/async`): unblocks `unittest`, `collections`, `contextlib`, `types` and everything
    that imports `asyncio` through `test.support`.
 3. **Layout**: split `pp/` into `pp/vm/` (host code) and `pp/lib/` (guest
    code) once in-flight branches have merged.
-4. **Remaining C modules → `pp/lib`** (one branch each): `math`, `_struct`,
-   `_string`, `_contextvars`, `_random`, `binascii`, `zlib`, `unicodedata`,
-   `_locale`, `_typing`, `_codecs`, plus accelerator stand-ins `_csv`, `_json`,
-   `_bisect`, `_pickle`, `_datetime`, `_hashlib`. Then a pp-native t-string
+4. **Remaining C modules → `pp/lib`** (one branch each): `math`,
+   `_string`, `_contextvars`, `_random`, `zlib`, `unicodedata`,
+   `_locale`, `_typing`, `_codecs`, plus accelerator stand-ins `_pickle` and
+   `_hashlib`. Iterate with `tools/host_test.py --swap <mod>`. Then a pp-native t-string
    `Template`/`Interpolation`.
 5. The ranked to-do list in [BLOCKERS.md](BLOCKERS.md#to-do) (doctest
    `displayhook`, PEP 695 TypeVars, `FunctionType(closure=)`, `__index__`,
@@ -61,7 +63,7 @@ What pp does not yet provide in pure Python, against Python 3.15's
 `sys.stdlib_module_names`. The importer is in `pp/importer.py`; pure-Python
 replacements live in `pp/lib/`. Already reimplemented: `_collections`,
 `array`, `_weakref`, `gc`, `itertools`, `_sre`, `_bisect`, `_datetime`,
-`_json`, `_csv`.
+`_json`, `_csv`, `_struct`, `binascii`.
 
 ### C modules still borrowed from the host (to reimplement)
 
@@ -70,11 +72,9 @@ replacements live in `pp/lib/`. Already reimplemented: `_collections`,
 | Module | Used by | Status |
 |---|---|---|
 | `math` | `fractions`, `statistics`, `random`, `decimal`, ... | |
-| `_struct` | `struct`, `pickle`, `zipfile`, `base64`, ... | |
 | `_string` | `string.Formatter` | |
 | `_contextvars` | `contextvars`, `asyncio`, `decimal` | |
 | `_random` | `random` | |
-| `binascii` | `base64`, `zipfile`, `email` | |
 | `zlib` | `gzip`, `zipfile` | |
 | `unicodedata` | `unicodedata`, normalization in `str` helpers | |
 | `_locale` | `locale` | |
@@ -111,7 +111,7 @@ Accelerators that pp blocks on purpose, so the pure-Python fallback runs
 
 ### Pure-Python stdlib modules not yet tracked on the dashboard
 
-Tracked today: 51 modules (see [STATUS.md](STATUS.md)). Untracked public
+Tracked today: 54 modules (see [STATUS.md](STATUS.md)). Untracked public
 modules, roughly in the order they are worth adding:
 
 - **Core**: `io`, `os`, `pathlib`, `struct`, `pickle`, `codecs`,

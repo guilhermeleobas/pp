@@ -6,25 +6,25 @@ A module counts as **pass** when its CPython test file runs to completion under 
 (`python -m pp run tools/run_unittest.py test.test_<module>`). The test file and every pure-Python module it
 imports run in the VM; C modules come from the host only if listed in `pp/importer.py`.
 
-Host C modules still borrowed: 15 temporary (to replace with Python), 16 permanent (host boundary).
+Host C modules still borrowed: 13 temporary (to replace with Python), 16 permanent (host boundary).
 
-Temporary: `_contextvars`, `_locale`, `_posixsubprocess`, `_random`, `_socket`, `_string`, `_struct`, `binascii`, `faulthandler`, `fcntl`, `math`, `resource`, `select`, `unicodedata`, `zlib`
+Temporary: `_contextvars`, `_locale`, `_posixsubprocess`, `_random`, `_socket`, `_string`, `faulthandler`, `fcntl`, `math`, `resource`, `select`, `unicodedata`, `zlib`
 
 ## Summary
 
 | Result | Modules |
 |---|---|
-| partial | 28 |
+| partial | 31 |
 | pass | 13 |
 | blocked | 4 |
-| timeout | 4 |
+| timeout | 3 |
 | fail | 3 |
 
 | Kind | Modules | What pp needs |
 |---|---|---|
 | Python | 31 | run the `.py` source through the VM |
-| Python + C helper | 18 | use its Python fallback if it has one, else reimplement the `_<name>` C helper |
-| C only | 3 | reimplement in Python under `pp/lib/` |
+| Python + C helper | 19 | use its Python fallback if it has one, else reimplement the `_<name>` C helper |
+| C only | 4 | reimplement in Python under `pp/lib/` |
 
 ## Top blockers
 
@@ -44,7 +44,7 @@ Temporary: `_contextvars`, `_locale`, `_posixsubprocess`, `_random`, `_socket`, 
 | 1 | heapq | Python + C helper | test/test_heapq.py | partial | `█████░░░░░` 47% 33/69 |  | FAILED (failures=2, skipped=34) |
 | 1 | reprlib | Python | test/test_reprlib.py | partial | `█████████░` 90% 30/33 |  | FAILED (errors=1, skipped=2) |
 | 1 | copyreg | Python | test/test_copyreg.py | pass | `██████████` 100% 6/6 |  |  |
-| 1 | itertools | C only | test/test_itertools.py | timeout | — |  | >600s |
+| 1 | itertools | C only | test/test_itertools.py | timeout | — |  | >1200s |
 | 2 | enum | Python | test/test_enum.py | partial | `██████████` 98% 1068/1087 |  | FAILED (failures=10, errors=5, skipped=4) |
 | 2 | contextlib | Python | test/test_contextlib.py | blocked | — |  | opcode GET_AWAITABLE is not implemented |
 | 2 | warnings | Python + C helper | test/test_warnings | partial | `████████░░` 82% 170/205 |  | FAILED (failures=22, errors=7, skipped=6) |
@@ -55,7 +55,7 @@ Temporary: `_contextvars`, `_locale`, `_posixsubprocess`, `_random`, `_socket`, 
 | 2 | fnmatch | Python | test/test_fnmatch.py | pass | `██████████` 100% 24/24 |  |  |
 | 2 | re | Python | test/test_re.py | partial | `██████████` 97% 163/168 |  | FAILED (failures=1, skipped=4) |
 | 3 | traceback | Python | test/test_traceback.py | partial | `███░░░░░░░` 26% 116/441 |  | FAILED (failures=43, errors=149, skipped=133) |
-| 3 | difflib | Python | test/test_difflib.py | timeout | — |  | >600s |
+| 3 | difflib | Python | test/test_difflib.py | partial | `██████░░░░` 59% 36/61 |  | FAILED (failures=25) |
 | 3 | pprint | Python | test/test_pprint.py | pass | `██████████` 100% 77/77 |  |  |
 | 3 | argparse | Python | test/test_argparse.py | partial | `██████████` 99% 1960/1963 |  | FAILED (errors=2, skipped=1) |
 | 3 | unittest | Python | test/test_unittest | blocked | — |  | opcode GET_AWAITABLE is not implemented |
@@ -64,9 +64,9 @@ Temporary: `_contextvars`, `_locale`, `_posixsubprocess`, `_random`, `_socket`, 
 | 4 | copy | Python | test/test_copy.py | partial | `█████████░` 94% 79/84 |  | FAILED (failures=4, errors=1) |
 | 4 | dataclasses | Python | test/test_dataclasses | partial | `████████░░` 79% 227/285 |  | FAILED (failures=20, errors=37, skipped=1) |
 | 4 | graphlib | Python | test/test_graphlib.py | pass | `██████████` 100% 17/17 |  |  |
-| 4 | json | Python | test/test_json | partial | `█████████░` 89% 212/237 |  | FAILED (failures=24, skipped=1) |
+| 4 | json | Python | test/test_json | partial | `█████████░` 89% 211/237 |  | FAILED (failures=24, errors=1, skipped=1) |
 | 4 | fractions | Python | test/test_fractions.py | pass | `██████████` 100% 50/50 |  |  |
-| 4 | statistics | Python + C helper | test/test_statistics.py | timeout | — |  | >600s |
+| 4 | statistics | Python + C helper | test/test_statistics.py | timeout | — |  | >1200s |
 | 4 | shlex | Python | test/test_shlex.py | pass | `██████████` 100% 45/45 |  |  |
 | 4 | glob | Python | test/test_glob.py | partial | `█████████░` 90% 20/22 |  | OK (skipped=2) |
 | 4 | posixpath | Python | test/test_posixpath.py | partial | `█████████░` 93% 90/96 |  | FAILED (failures=1, skipped=5) |
@@ -78,7 +78,7 @@ Temporary: `_contextvars`, `_locale`, `_posixsubprocess`, `_random`, `_socket`, 
 | 4 | random | Python + C helper | test/test_random.py | partial | `█████████░` 86% 100/116 |  | FAILED (errors=14, skipped=2) |
 | 4 | typing | Python + C helper | test/test_typing.py | fail | — |  | TypeError: Parameters to Generic[...] must all be type variables or parameter specification variables. |
 | 4 | decimal | Python + C helper | test/test_decimal.py | fail | `░░░░░░░░░░` 0% 0/587 |  | FAILED (failures=432, skipped=203) |
-| 4 | datetime | Python + C helper | test/test_datetime.py | timeout | — |  | >600s |
+| 4 | datetime | Python + C helper | test/test_datetime.py | timeout | — |  | >1200s |
 | 4 | inspect | Python | test/test_inspect | fail | `░░░░░░░░░░` 0% 0/1 |  | FAILED (errors=1) |
 | 4 | dis | Python | test/test_dis.py | partial | `████████░░` 78% 114/145 |  | FAILED (failures=7, skipped=24) |
 | 4 | ast | Python + C helper | test/test_ast | partial | `██████████` 96% 213/220 |  | FAILED (failures=5, errors=1, skipped=1) |
@@ -88,3 +88,5 @@ Temporary: `_contextvars`, `_locale`, `_posixsubprocess`, `_random`, `_socket`, 
 | 4 | configparser | Python | test/test_configparser.py | partial | `██████████` 98% 378/383 |  | OK (skipped=5) |
 | 4 | array | C only | test/test_array.py | partial | `█████████░` 93% 1030/1098 |  | FAILED (failures=17, skipped=51) |
 | 4 | gc | C only | test/test_gc.py | partial | `███░░░░░░░` 31% 19/61 | collect() frees nothing; object enumeration is empty (see pp/lib/gc.py) | FAILED (failures=33, errors=1, skipped=8) |
+| 4 | struct | Python + C helper | test/test_struct.py | partial | `█████████░` 91% 43/47 |  | FAILED (failures=1, skipped=3) |
+| 4 | binascii | C only | test/test_binascii.py | partial | `█████████░` 92% 220/237 |  | OK (skipped=17) |

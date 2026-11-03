@@ -44,6 +44,15 @@
   "skipped": 0,
   "total": 67
  },
+ "binascii": {
+  "detail": "OK (skipped=17)",
+  "errors": 0,
+  "failures": 0,
+  "passed": 220,
+  "result": "partial",
+  "skipped": 17,
+  "total": 237
+ },
  "bisect": {
   "detail": "",
   "errors": 0,
@@ -135,7 +144,7 @@
   "total": 285
  },
  "datetime": {
-  "detail": ">600s",
+  "detail": ">1200s",
   "result": "timeout"
  },
  "decimal": {
@@ -148,8 +157,13 @@
   "total": 587
  },
  "difflib": {
-  "detail": ">600s",
-  "result": "timeout"
+  "detail": "FAILED (failures=25)",
+  "errors": 0,
+  "failures": 25,
+  "passed": 36,
+  "result": "partial",
+  "skipped": 0,
+  "total": 61
  },
  "dis": {
   "detail": "FAILED (failures=7, skipped=24)",
@@ -260,14 +274,14 @@
   "total": 212
  },
  "itertools": {
-  "detail": ">600s",
+  "detail": ">1200s",
   "result": "timeout"
  },
  "json": {
-  "detail": "FAILED (failures=24, skipped=1)",
-  "errors": 0,
+  "detail": "FAILED (failures=24, errors=1, skipped=1)",
+  "errors": 1,
   "failures": 24,
-  "passed": 212,
+  "passed": 211,
   "result": "partial",
   "skipped": 1,
   "total": 237
@@ -363,7 +377,7 @@
   "total": 45
  },
  "statistics": {
-  "detail": ">600s",
+  "detail": ">1200s",
   "result": "timeout"
  },
  "string": {
@@ -374,6 +388,15 @@
   "result": "partial",
   "skipped": 0,
   "total": 55
+ },
+ "struct": {
+  "detail": "FAILED (failures=1, skipped=3)",
+  "errors": 0,
+  "failures": 1,
+  "passed": 43,
+  "result": "partial",
+  "skipped": 3,
+  "total": 47
  },
  "textwrap": {
   "detail": "",
