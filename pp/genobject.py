@@ -1,7 +1,7 @@
 """Generators, coroutines and async generators, modeled on Objects/genobject.c.
 
-`PyGenObject` carries CPython's fields (`gi_frame_state`, `gi_exc_state`,
-`gi_name`, `gi_qualname`, `gi_iframe`). Where C returns NULL with an exception
+The fields of CPython's PyGenObject (frame state, exception state, frame, ...) live in
+a `_GenState` the guest cannot reach (see `_hide_state`). Where C returns NULL with an exception
 set, functions here raise; `PYGEN_NEXT` / `PYGEN_RETURN` results are returned as
 `(kind, value)`.
 """
@@ -42,100 +42,128 @@ def FRAME_STATE_FINISHED(state: int) -> bool:
     return state == FRAME_CLEARED
 
 
-# Names of VM state that dir() does not list (CPython keeps them in the C struct).
-_HIDDEN = frozenset((
-    "_kind", "gi_frame_state", "gi_exc_state", "gi_iframe", "gi_tstate", "ag_closed",
-    "ag_hooks_inited", "ag_running_async", "ag_origin_or_finalizer", "ags_gen", "ags_sendval",
-    "ags_state", "agt_gen", "agt_typ", "agt_tb", "agt_val", "agt_state", "cw_coroutine"))
+class _GenState:
+    """VM state of one generator, coroutine or async generator: CPython's PyGenObject
+    fields. It is held in a slot whose descriptor is removed from the type (see
+    `_hide_state`), so guest attribute lookup cannot reach it."""
+    __slots__ = ("frame_state", "exc_state", "iframe", "tstate", "code",
+                 "finalizer", "closed", "hooks_inited", "running_async")
 
 
-def _public_dir(self):
-    names = [n for n in object.__dir__(self) if n not in _HIDDEN]
-    if type(self) is not PyGenObject:
-        # gi_code is the slot holding every kind's code; only generators have it.
-        names = [n for n in names if n != "gi_code"]
-    return sorted(names)
+class _AwaitableState:
+    """VM state of an asend/athrow awaitable or a coroutine_wrapper (same hiding)."""
+    __slots__ = ("gen", "sendval", "typ", "val", "tb", "state", "coroutine")
 
 
-class _PyGenBase:
-    """The fields and finalizer shared by generators, coroutines and async generators
-    (PyGenObject's common header)."""
-    _kind = "generator"
+_STATE_GET: dict = {}      # exact type -> getter of its hidden state slot
+_STATE_SET: dict = {}
 
-    # `__name__`/`__qualname__` are slots (as on the old Generator).
-    __slots__ = ("gi_frame_state", "gi_exc_state", "__name__", "__qualname__", "gi_iframe",
-                 "gi_tstate", "gi_code", "__weakref__")
 
-    def __init__(self, frame, func, tstate):
-        self.gi_iframe = frame
-        self.gi_code = frame.f_executable
-        frame.owner = FRAME_OWNED_BY_GENERATOR
-        self.__name__ = func.__name__ if func is not None else frame.code.co_name
-        self.__qualname__ = func.__qualname__ if func is not None else frame.code.co_qualname
-        self.gi_exc_state = _PyErr_StackItem()
-        self.gi_frame_state = FRAME_CREATED
-        self.gi_tstate = tstate
+def _hide_state(cls) -> None:
+    """Keep the state slot of `cls` but drop its descriptor (and `__slots__`) from the
+    type: only the captured accessors reach it, as with fields of a C struct."""
+    descr = cls.__dict__["_s"]
+    _STATE_GET[cls] = descr.__get__
+    _STATE_SET[cls] = descr.__set__
+    del cls._s
+    for name in ("__slots__", "__static_attributes__", "__firstlineno__"):
+        if name in cls.__dict__:
+            delattr(cls, name)
 
-    def __repr__(self):
-        return f"<{self._kind} object {self.__qualname__} at {id(self):#x}>"
 
-    def __del__(self):
-        gen_finalize(self)
-
-    __dir__ = _public_dir
+def _S(o):
+    return _STATE_GET[type(o)](o)
 
 
 def _gen_frame(gen):
-    if gen.gi_frame_state == FRAME_CLEARED:
+    st = _S(gen)
+    if st.frame_state == FRAME_CLEARED:
         return None
-    return _PyFrame_GetFrameObject(gen.gi_iframe)
+    return _PyFrame_GetFrameObject(st.iframe)
 
 
 def _gen_yf(gen):
-    if gen.gi_frame_state == FRAME_SUSPENDED_YIELD_FROM:
-        return gen.gi_iframe.stack[-2]
+    st = _S(gen)
+    if st.frame_state == FRAME_SUSPENDED_YIELD_FROM:
+        return st.iframe.stack[-2]
     return None
 
 
-class _SendMixin:
-    """send/throw/close of generators and coroutines."""
-    __slots__ = ()
-
-    def send(self, arg, /):
-        return gen_send(self, arg)
-
-    def throw(self, *args):
-        return gen_throw(self, args)
-
-    def close(self):
-        return gen_close(self)
+def _gen_send(self, arg, /):
+    return gen_send(self, arg)
 
 
-class PyGenObject(_SendMixin, _PyGenBase):
-    __slots__ = ()
+def _gen_throw_method(self, *args):
+    return gen_throw(self, args)
 
-    # --- introspection (genobject.c getset/member tables) ---
+
+def _gen_close_method(self):
+    return gen_close(self)
+
+
+def _gen_del(self):
+    gen_finalize(self)
+
+
+def _gen_repr(self):
+    return f"<{type(self).__name__} object {self.__qualname__} at {id(self):#x}>"
+
+
+def _gen_iter(self):
+    return self
+
+
+def _gen_next(self):
+    return gen_iternext(self)
+
+
+def _prop(fn):
+    return property(fn)
+
+
+class PyGenObject:
+    __slots__ = ("_s", "__name__", "__qualname__", "__weakref__")
+
+    send = _gen_send
+    throw = _gen_throw_method
+    close = _gen_close_method
+    __del__ = _gen_del
+    __repr__ = _gen_repr
+    __iter__ = _gen_iter
+    __next__ = _gen_next
+    __class_getitem__ = classmethod(types.GenericAlias)
+    __sizeof__ = object.__sizeof__
 
     gi_frame = property(_gen_frame)
-    gi_running = property(lambda self: self.gi_frame_state == FRAME_EXECUTING)
-    gi_suspended = property(lambda self: FRAME_STATE_SUSPENDED(self.gi_frame_state))
+    gi_running = property(lambda self: _S(self).frame_state == FRAME_EXECUTING)
+    gi_suspended = property(lambda self: FRAME_STATE_SUSPENDED(_S(self).frame_state))
     gi_yieldfrom = property(_gen_yf)
+    gi_code = property(lambda self: _S(self).code)
+    gi_state = property(lambda self: gen_get_state(self))
 
-    @property
-    def gi_state(self):
-        return gen_get_state(self)
 
-    # --- protocol: methods the host (and VM code via the type slots) can call ---
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        return gen_iternext(self)
+def PyGen_New(cls, frame, func, tstate):
+    """PyGen_New / PyCoro_New / PyAsyncGen_New: wrap the (just returned from) `frame`."""
+    gen = object.__new__(cls)
+    st = _GenState()
+    st.iframe = frame
+    st.code = frame.f_executable
+    frame.owner = FRAME_OWNED_BY_GENERATOR
+    gen.__name__ = func.__name__ if func is not None else frame.code.co_name
+    gen.__qualname__ = func.__qualname__ if func is not None else frame.code.co_qualname
+    st.exc_state = _PyErr_StackItem()
+    st.frame_state = FRAME_CREATED
+    st.tstate = tstate
+    st.finalizer = None
+    st.closed = False
+    st.hooks_inited = False
+    st.running_async = False
+    _STATE_SET[cls](gen, st)
+    return gen
 
 
 def gen_get_state(gen, prefix="GEN") -> str:
-    state = gen.gi_frame_state
+    state = _S(gen).frame_state
     if state == FRAME_CREATED:
         return prefix + "_CREATED"
     if FRAME_STATE_SUSPENDED(state):
@@ -147,16 +175,17 @@ def gen_get_state(gen, prefix="GEN") -> str:
 
 def gen_finalize(gen) -> None:
     """gen_finalize (the tp_finalize of generators, coroutines, async generators)."""
-    state = gen.gi_frame_state
+    st = _S(gen)
+    state = st.frame_state
     if FRAME_STATE_FINISHED(state):
         return
     try:
         if PyAsyncGen_CheckExact(gen):
-            finalizer = gen.ag_origin_or_finalizer
-            if finalizer is not None and not gen.ag_closed:
+            finalizer = st.finalizer
+            if finalizer is not None and not st.closed:
                 _call_finalizer(finalizer, gen)
                 return
-        if gen.gi_code.co_flags & CO_COROUTINE and state == FRAME_CREATED:
+        if st.code.co_flags & CO_COROUTINE and state == FRAME_CREATED:
             _warn_unawaited_coroutine(gen)
         else:
             gen_close(gen)
@@ -183,46 +212,61 @@ def _warn_unawaited_coroutine(coro) -> None:
         PyErr_WarnEx(RuntimeWarning, f"coroutine '{coro.__qualname__}' was never awaited", 1)
 
 
+def _wrapper_iternext(self):
+    return gen_iternext(_S(self).coroutine)
+
+
+def _wrapper_send(self, arg, /):
+    return gen_send(_S(self).coroutine, arg)
+
+
+def _wrapper_throw(self, *args):
+    return gen_throw(_S(self).coroutine, args)
+
+
+def _wrapper_close(self):
+    return gen_close(_S(self).coroutine)
+
+
 class PyCoroWrapper:
     """coroutine_wrapper: what `coro.__await__()` returns."""
-    __slots__ = ("cw_coroutine",)
+    __slots__ = ("_s",)
 
-    __dir__ = _public_dir
-
-    def __init__(self, coro):
-        self.cw_coroutine = coro
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        return gen_iternext(self.cw_coroutine)
-
-    def send(self, arg, /):
-        return gen_send(self.cw_coroutine, arg)
-
-    def throw(self, *args):
-        return gen_throw(self.cw_coroutine, args)
-
-    def close(self):
-        return gen_close(self.cw_coroutine)
+    __iter__ = _gen_iter
+    __next__ = _wrapper_iternext
+    send = _wrapper_send
+    throw = _wrapper_throw
+    close = _wrapper_close
 
 
-class PyCoroObject(_SendMixin, _PyGenBase):
-    _kind = "coroutine"
-    __slots__ = ()
+def _coro_await(self):
+    w = object.__new__(PyCoroWrapper)
+    st = _AwaitableState()
+    st.coroutine = self
+    _STATE_SET[PyCoroWrapper](w, st)
+    return w
+
+
+class PyCoroObject:
+    __slots__ = ("_s", "__name__", "__qualname__", "__weakref__")
+
+    send = _gen_send
+    throw = _gen_throw_method
+    close = _gen_close_method
+    __del__ = _gen_del
+    __repr__ = _gen_repr
+    __await__ = _coro_await
+    __class_getitem__ = classmethod(types.GenericAlias)
+    __sizeof__ = object.__sizeof__
 
     cr_frame = property(_gen_frame)
-    cr_code = property(lambda self: self.gi_code)
-    cr_running = property(lambda self: self.gi_frame_state == FRAME_EXECUTING)
-    cr_suspended = property(lambda self: FRAME_STATE_SUSPENDED(self.gi_frame_state))
+    cr_code = property(lambda self: _S(self).code)
+    cr_running = property(lambda self: _S(self).frame_state == FRAME_EXECUTING)
+    cr_suspended = property(lambda self: FRAME_STATE_SUSPENDED(_S(self).frame_state))
     cr_await = property(_gen_yf)
     # Coroutine origin tracking (sys.set_coroutine_origin_tracking_depth) is not modeled.
     cr_origin = property(lambda self: None)
     cr_state = property(lambda self: gen_get_state(self, "CORO"))
-
-    def __await__(self):
-        return PyCoroWrapper(self)
 
 
 AWAITABLE_STATE_INIT = 0
@@ -232,50 +276,60 @@ AWAITABLE_STATE_CLOSED = 2
 ASYNC_GEN_IGNORED_EXIT_MSG = "async generator ignored GeneratorExit"
 
 
-class PyAsyncGenObject(_PyGenBase):
-    _kind = "async_generator"
-    __slots__ = ("ag_origin_or_finalizer", "ag_closed", "ag_hooks_inited", "ag_running_async")
+def _agen_aiter(self):
+    return self
 
-    def __init__(self, frame, func, tstate):
-        _PyGenBase.__init__(self, frame, func, tstate)
-        self.ag_origin_or_finalizer = None
-        self.ag_closed = False
-        self.ag_hooks_inited = False
-        self.ag_running_async = False
+
+def _agen_anext(self):
+    async_gen_init_hooks(self)
+    return _new_asend(self, None)
+
+
+def _agen_asend(self, arg, /):
+    async_gen_init_hooks(self)
+    return _new_asend(self, arg)
+
+
+def _agen_aclose(self):
+    async_gen_init_hooks(self)
+    return _new_athrow(self, ())
+
+
+def _agen_athrow(self, *args):
+    if not args:
+        raise TypeError("athrow expected at least 1 argument, got 0")
+    if len(args) > 1:
+        PyErr_WarnEx(DeprecationWarning,
+                     "the (type, exc, tb) signature of athrow() is deprecated, "
+                     "use the single-arg signature instead.", 1)
+    async_gen_init_hooks(self)
+    return _new_athrow(self, args)
+
+
+class PyAsyncGenObject:
+    __slots__ = ("_s", "__name__", "__qualname__", "__weakref__")
+
+    __aiter__ = _agen_aiter
+    __anext__ = _agen_anext
+    asend = _agen_asend
+    aclose = _agen_aclose
+    athrow = _agen_athrow
+    __del__ = _gen_del
+    __repr__ = _gen_repr
+    __class_getitem__ = classmethod(types.GenericAlias)
+    __sizeof__ = object.__sizeof__
 
     ag_frame = property(_gen_frame)
-    ag_code = property(lambda self: self.gi_code)
-    ag_running = property(lambda self: self.ag_running_async)
-    ag_suspended = property(lambda self: FRAME_STATE_SUSPENDED(self.gi_frame_state))
+    ag_code = property(lambda self: _S(self).code)
+    ag_running = property(lambda self: _S(self).running_async)
+    ag_suspended = property(lambda self: FRAME_STATE_SUSPENDED(_S(self).frame_state))
     ag_await = property(_gen_yf)
     ag_state = property(lambda self: gen_get_state(self, "AGEN"))
 
-    def __aiter__(self):
-        return self
 
-    def __anext__(self):
-        async_gen_init_hooks(self)
-        return PyAsyncGenASend(self, None)
-
-    def asend(self, arg, /):
-        async_gen_init_hooks(self)
-        return PyAsyncGenASend(self, arg)
-
-    def aclose(self):
-        async_gen_init_hooks(self)
-        return PyAsyncGenAThrow(self, ())
-
-    def athrow(self, *args):
-        if not args:
-            raise TypeError("athrow expected at least 1 argument, got 0")
-        if len(args) > 1:
-            PyErr_WarnEx(DeprecationWarning,
-                         "the (type, exc, tb) signature of athrow() is deprecated, "
-                         "use the single-arg signature instead.", 1)
-        async_gen_init_hooks(self)
-        return PyAsyncGenAThrow(self, args)
-
-
+for _cls in (PyGenObject, PyCoroObject, PyAsyncGenObject, PyCoroWrapper):
+    _hide_state(_cls)
+del _cls
 
 
 def PyGen_CheckExact(o) -> bool:
@@ -299,21 +353,21 @@ def _gen_raise_already_executing_error(gen):
 
 
 def _clear_gen_frame(gen) -> None:
-    gen.gi_iframe = None
+    _S(gen).iframe = None
 
 
 def gen_send_ex2(gen, arg, exc=None):
     """Resume the (EXECUTING) generator with `arg`, or by throwing `exc` into it.
     -> (PYGEN_NEXT, yielded value) or (PYGEN_RETURN, return value)."""
-    tstate = gen.gi_tstate
-    frame = gen.gi_iframe
+    tstate = _S(gen).tstate
+    frame = _S(gen).iframe
 
     # Push arg onto the frame's value stack
     frame.stack.append(arg)
 
     prev_exc_info = tstate.exc_info
-    gen.gi_exc_state.previous_item = prev_exc_info
-    tstate.exc_info = gen.gi_exc_state
+    _S(gen).exc_state.previous_item = prev_exc_info
+    tstate.exc_info = _S(gen).exc_state
 
     if exc is not None:
         _PyErr_ChainStackItem(tstate, exc)
@@ -325,31 +379,31 @@ def gen_send_ex2(gen, arg, exc=None):
     except BaseException as e:
         err = e
     tstate.exc_info = prev_exc_info
-    gen.gi_exc_state.previous_item = None
+    _S(gen).exc_state.previous_item = None
     # A suspended or finished generator frame has no caller (gen_send_ex2 sets
     # `previous = NULL`); keeping it would tie the generator to its last resumer.
     frame.previous = None
     if err is not None:
         # The generator frame is cleared when an exception propagates out of it.
-        gen.gi_frame_state = FRAME_CLEARED
+        _S(gen).frame_state = FRAME_CLEARED
         _clear_gen_frame(gen)
         raise err
 
     if frame.yielded:
         # YIELD_VALUE: suspended (oparg 1 means a `yield from` / await in progress).
-        gen.gi_frame_state = FRAME_SUSPENDED_YIELD_FROM if frame.yield_oparg == 1 \
+        _S(gen).frame_state = FRAME_SUSPENDED_YIELD_FROM if frame.yield_oparg == 1 \
             else FRAME_SUSPENDED
         return PYGEN_NEXT, result
 
     # The generator just returned (as opposed to yielding).
-    gen.gi_frame_state = FRAME_CLEARED
+    _S(gen).frame_state = FRAME_CLEARED
     _clear_gen_frame(gen)
     return PYGEN_RETURN, result
 
 
 def gen_send_ex(gen, arg, called_from_iternext=False):
     """-> (kind, value). `arg` is None for next(). Errors raise."""
-    frame_state = gen.gi_frame_state
+    frame_state = _S(gen).frame_state
     if frame_state == FRAME_CREATED and arg is not None:
         if PyCoro_CheckExact(gen):
             raise TypeError(NON_INIT_CORO_MSG)
@@ -366,7 +420,7 @@ def gen_send_ex(gen, arg, called_from_iternext=False):
             # `gen` is an exhausted generator: only return a value if called from send().
             return PYGEN_RETURN, None
         raise StopIteration
-    gen.gi_frame_state = FRAME_EXECUTING
+    _S(gen).frame_state = FRAME_EXECUTING
     return gen_send_ex2(gen, arg, None)
 
 
@@ -411,9 +465,9 @@ def gen_close_iter(yf) -> None:
 
 
 def gen_close(gen):
-    frame_state = gen.gi_frame_state
+    frame_state = _S(gen).frame_state
     if frame_state == FRAME_CREATED:
-        gen.gi_frame_state = FRAME_CLEARED
+        _S(gen).frame_state = FRAME_CLEARED
         _clear_gen_frame(gen)
         return None
     if FRAME_STATE_FINISHED(frame_state):
@@ -421,8 +475,8 @@ def gen_close(gen):
     if frame_state == FRAME_EXECUTING:
         raise _gen_raise_already_executing_error(gen)
 
-    gen.gi_frame_state = FRAME_EXECUTING
-    frame = gen.gi_iframe
+    _S(gen).frame_state = FRAME_EXECUTING
+    frame = _S(gen).iframe
     err = None
     if frame_state == FRAME_SUSPENDED_YIELD_FROM:
         yf = frame.stack[-2]
@@ -491,7 +545,7 @@ def gen_set_exception(typ, val, tb):
 
 
 def _gen_throw(gen, close_on_genexit, typ, val, tb):
-    frame_state = gen.gi_frame_state
+    frame_state = _S(gen).frame_state
     if frame_state == FRAME_EXECUTING:
         raise _gen_raise_already_executing_error(gen)
     if FRAME_STATE_FINISHED(frame_state):
@@ -499,12 +553,12 @@ def _gen_throw(gen, close_on_genexit, typ, val, tb):
             # `gen` is an exhausted coroutine: raise an error
             raise RuntimeError("cannot reuse already awaited coroutine")
         exc = gen_set_exception(typ, val, tb)
-        _PyErr_SetRaisedException(gen.gi_tstate, exc)
+        _PyErr_SetRaisedException(_S(gen).tstate, exc)
         raise exc
 
-    gen.gi_frame_state = FRAME_EXECUTING
+    _S(gen).frame_state = FRAME_EXECUTING
     if frame_state == FRAME_SUSPENDED_YIELD_FROM:
-        frame = gen.gi_iframe
+        frame = _S(gen).iframe
         yf = frame.stack[-2]
         # Never resume the frame from inside a host `except` block: the host would
         # chain its handled exception onto everything raised.
@@ -536,7 +590,7 @@ def _gen_throw(gen, close_on_genexit, typ, val, tb):
                 lookup_err = e
             if lookup_err is not None:
                 # genobject.c: restore the frame state and propagate.
-                gen.gi_frame_state = frame_state
+                _S(gen).frame_state = frame_state
                 raise lookup_err
             if meth is NULL:
                 throw_here = True
@@ -555,7 +609,7 @@ def _gen_throw(gen, close_on_genexit, typ, val, tb):
             # gen_throw_current_exception: send the error into the generator.
             return _throw_current_exception(gen, err)
         if not throw_here:
-            gen.gi_frame_state = frame_state
+            _S(gen).frame_state = frame_state
             return ret
     exc = _gen_set_exception_resetting(gen, frame_state, typ, val, tb)
     return _throw_current_exception(gen, exc)
@@ -569,13 +623,13 @@ def _gen_set_exception_resetting(gen, frame_state, typ, val, tb):
     except BaseException as e:
         err = e
     if err is not None:
-        gen.gi_frame_state = frame_state
+        _S(gen).frame_state = frame_state
         raise err
     return exc
 
 
 def _throw_current_exception(gen, exc):
-    _PyErr_SetRaisedException(gen.gi_tstate, exc)
+    _PyErr_SetRaisedException(_S(gen).tstate, exc)
     kind, result = gen_send_ex2(gen, None, exc)
     if kind == PYGEN_RETURN:
         _gen_set_stop_iteration(gen, result)
@@ -605,8 +659,14 @@ register_static_slots(PyCoroObject, am_send=gen_am_send)
 
 # --- awaitables ---------------------------------------------------------------
 
+def coro_is_awaited(coro) -> bool:
+    """The coroutine is suspended in a `yield from` / await (`cr_await` is set)."""
+    return _S(coro).frame_state in (FRAME_SUSPENDED_YIELD_FROM,
+                                    FRAME_SUSPENDED_YIELD_FROM_LOCKED)
+
+
 def gen_is_coroutine(o) -> bool:
-    return PyGen_CheckExact(o) and bool(o.gi_code.co_flags & CO_ITERABLE_COROUTINE)
+    return PyGen_CheckExact(o) and bool(_S(o).code.co_flags & CO_ITERABLE_COROUTINE)
 
 
 def PyCoro_GetAwaitableIter(o):
@@ -646,12 +706,12 @@ def _wrapped(o) -> bool:
 
 
 def async_gen_init_hooks(o) -> None:
-    if o.ag_hooks_inited:
+    if _S(o).hooks_inited:
         return
-    o.ag_hooks_inited = True
+    _S(o).hooks_inited = True
     firstiter, finalizer = sys.get_asyncgen_hooks()
     if finalizer is not None:
-        o.ag_origin_or_finalizer = finalizer
+        _S(o).finalizer = finalizer
     if firstiter is not None:
         _call_finalizer(firstiter, o)
 
@@ -667,14 +727,14 @@ def async_gen_unwrap_value(gen, step):
         err = e
     if err is not None:
         if isinstance(err, (StopAsyncIteration, GeneratorExit)):
-            gen.ag_closed = True
-        gen.ag_running_async = False
+            _S(gen).closed = True
+        _S(gen).running_async = False
         try:
             raise err
         finally:
             err = None
     if _wrapped(result):
-        gen.ag_running_async = False
+        _S(gen).running_async = False
         raise StopIteration(result.agw_val)
     return result
 
@@ -687,51 +747,67 @@ def _warn_unawaited_agen_method(agen, method) -> None:
         pass
 
 
+def _asend_await(self):
+    return self
+
+
+def _asend_next(self):
+    return async_gen_asend_send(self, None)
+
+
+def _asend_send(self, arg, /):
+    return async_gen_asend_send(self, arg)
+
+
+def _asend_throw(self, *args):
+    return async_gen_asend_throw(self, args)
+
+
+def _asend_close(self):
+    return async_gen_asend_close(self)
+
+
+def _asend_del(self):
+    st = _S(self)
+    if st.state == AWAITABLE_STATE_INIT:
+        _warn_unawaited_agen_method(st.gen, "asend")
+
+
 class PyAsyncGenASend:
     """async_generator_asend: the awaitable of `__anext__()` / `asend()`."""
-    __slots__ = ("ags_gen", "ags_sendval", "ags_state", "__weakref__")
-    __dir__ = _public_dir
+    __slots__ = ("_s",)
 
-    def __init__(self, gen, sendval):
-        self.ags_gen = gen
-        self.ags_sendval = sendval
-        self.ags_state = AWAITABLE_STATE_INIT
+    __await__ = _asend_await
+    __iter__ = _gen_iter
+    __next__ = _asend_next
+    send = _asend_send
+    throw = _asend_throw
+    close = _asend_close
+    __del__ = _asend_del
 
-    def __await__(self):
-        return self
 
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        return async_gen_asend_send(self, None)
-
-    def send(self, arg, /):
-        return async_gen_asend_send(self, arg)
-
-    def throw(self, *args):
-        return async_gen_asend_throw(self, args)
-
-    def close(self):
-        return async_gen_asend_close(self)
-
-    def __del__(self):
-        if self.ags_state == AWAITABLE_STATE_INIT:
-            _warn_unawaited_agen_method(self.ags_gen, "asend")
+def _new_asend(gen, sendval):
+    o = object.__new__(PyAsyncGenASend)
+    st = _AwaitableState()
+    st.gen = gen
+    st.sendval = sendval
+    st.state = AWAITABLE_STATE_INIT
+    _STATE_SET[PyAsyncGenASend](o, st)
+    return o
 
 
 def async_gen_asend_send(o, arg):
-    if o.ags_state == AWAITABLE_STATE_CLOSED:
+    if _S(o).state == AWAITABLE_STATE_CLOSED:
         raise RuntimeError("cannot reuse already awaited __anext__()/asend()")
-    gen = o.ags_gen
-    if o.ags_state == AWAITABLE_STATE_INIT:
-        if gen.ag_running_async:
-            o.ags_state = AWAITABLE_STATE_CLOSED
+    gen = _S(o).gen
+    if _S(o).state == AWAITABLE_STATE_INIT:
+        if _S(gen).running_async:
+            _S(o).state = AWAITABLE_STATE_CLOSED
             raise RuntimeError("anext(): asynchronous generator is already running")
         if arg is None:
-            arg = o.ags_sendval
-        o.ags_state = AWAITABLE_STATE_ITER
-    gen.ag_running_async = True
+            arg = _S(o).sendval
+        _S(o).state = AWAITABLE_STATE_ITER
+    _S(gen).running_async = True
     err = None
     result = NULL
     try:
@@ -739,7 +815,7 @@ def async_gen_asend_send(o, arg):
     except BaseException as e:
         err = e
     if err is not None:
-        o.ags_state = AWAITABLE_STATE_CLOSED
+        _S(o).state = AWAITABLE_STATE_CLOSED
         try:
             raise err
         finally:
@@ -760,15 +836,15 @@ def async_gen_asend_am_send(o, arg):
 
 
 def async_gen_asend_throw(o, args):
-    if o.ags_state == AWAITABLE_STATE_CLOSED:
+    if _S(o).state == AWAITABLE_STATE_CLOSED:
         raise RuntimeError("cannot reuse already awaited __anext__()/asend()")
-    gen = o.ags_gen
-    if o.ags_state == AWAITABLE_STATE_INIT:
-        if gen.ag_running_async:
-            o.ags_state = AWAITABLE_STATE_CLOSED
+    gen = _S(o).gen
+    if _S(o).state == AWAITABLE_STATE_INIT:
+        if _S(gen).running_async:
+            _S(o).state = AWAITABLE_STATE_CLOSED
             raise RuntimeError("anext(): asynchronous generator is already running")
-        o.ags_state = AWAITABLE_STATE_ITER
-        gen.ag_running_async = True
+        _S(o).state = AWAITABLE_STATE_ITER
+        _S(gen).running_async = True
     err = None
     result = NULL
     try:
@@ -776,8 +852,8 @@ def async_gen_asend_throw(o, args):
     except BaseException as e:
         err = e
     if err is not None:
-        gen.ag_running_async = False
-        o.ags_state = AWAITABLE_STATE_CLOSED
+        _S(gen).running_async = False
+        _S(o).state = AWAITABLE_STATE_CLOSED
         try:
             raise err
         finally:
@@ -800,87 +876,98 @@ def _close_awaitable(throw, o):
 
 
 def async_gen_asend_close(o):
-    if o.ags_state == AWAITABLE_STATE_CLOSED:
+    if _S(o).state == AWAITABLE_STATE_CLOSED:
         return None
     return _close_awaitable(async_gen_asend_throw, o)
 
 
+def _athrow_next(self):
+    return async_gen_athrow_send(self, None)
+
+
+def _athrow_send(self, arg, /):
+    return async_gen_athrow_send(self, arg)
+
+
+def _athrow_throw(self, *args):
+    return async_gen_athrow_throw(self, args)
+
+
+def _athrow_close(self):
+    if _S(self).state == AWAITABLE_STATE_CLOSED:
+        return None
+    return _close_awaitable(async_gen_athrow_throw, self)
+
+
+def _athrow_del(self):
+    st = _S(self)
+    if st.state == AWAITABLE_STATE_INIT:
+        _warn_unawaited_agen_method(st.gen, "athrow" if st.typ is not None else "aclose")
+
+
 class PyAsyncGenAThrow:
     """async_generator_athrow: the awaitable of `aclose()` / `athrow()`."""
-    __slots__ = ("agt_gen", "agt_typ", "agt_tb", "agt_val", "agt_state", "__weakref__")
-    __dir__ = _public_dir
+    __slots__ = ("_s",)
 
-    def __init__(self, gen, args):
-        nargs = len(args)
-        if nargs > 3:
-            raise TypeError(f"athrow expected at most 3 arguments, got {nargs}")
-        self.agt_gen = gen
-        self.agt_typ = args[0] if nargs > 0 else None
-        self.agt_val = args[1] if nargs > 1 else NULL
-        self.agt_tb = args[2] if nargs > 2 else NULL
-        self.agt_state = AWAITABLE_STATE_INIT
+    __await__ = _asend_await
+    __iter__ = _gen_iter
+    __next__ = _athrow_next
+    send = _athrow_send
+    throw = _athrow_throw
+    close = _athrow_close
+    __del__ = _athrow_del
 
-    def __await__(self):
-        return self
 
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        return async_gen_athrow_send(self, None)
-
-    def send(self, arg, /):
-        return async_gen_athrow_send(self, arg)
-
-    def throw(self, *args):
-        return async_gen_athrow_throw(self, args)
-
-    def close(self):
-        if self.agt_state == AWAITABLE_STATE_CLOSED:
-            return None
-        return _close_awaitable(async_gen_athrow_throw, self)
-
-    def __del__(self):
-        if self.agt_state == AWAITABLE_STATE_INIT:
-            _warn_unawaited_agen_method(self.agt_gen,
-                                        "athrow" if self.agt_typ is not None else "aclose")
+def _new_athrow(gen, args):
+    nargs = len(args)
+    if nargs > 3:
+        raise TypeError(f"athrow expected at most 3 arguments, got {nargs}")
+    o = object.__new__(PyAsyncGenAThrow)
+    st = _AwaitableState()
+    st.gen = gen
+    st.typ = args[0] if nargs > 0 else None
+    st.val = args[1] if nargs > 1 else NULL
+    st.tb = args[2] if nargs > 2 else NULL
+    st.state = AWAITABLE_STATE_INIT
+    _STATE_SET[PyAsyncGenAThrow](o, st)
+    return o
 
 
 def _athrow_running_error(o) -> RuntimeError:
-    which = "aclose" if o.agt_typ is None else "athrow"
+    which = "aclose" if _S(o).typ is None else "athrow"
     return RuntimeError(f"{which}(): asynchronous generator is already running")
 
 
 def async_gen_athrow_send(o, arg):
-    gen = o.agt_gen
-    if o.agt_state == AWAITABLE_STATE_CLOSED:
+    gen = _S(o).gen
+    if _S(o).state == AWAITABLE_STATE_CLOSED:
         raise RuntimeError("cannot reuse already awaited aclose()/athrow()")
-    if FRAME_STATE_FINISHED(gen.gi_frame_state):
-        o.agt_state = AWAITABLE_STATE_CLOSED
+    if FRAME_STATE_FINISHED(_S(gen).frame_state):
+        _S(o).state = AWAITABLE_STATE_CLOSED
         raise StopIteration
-    aclose = o.agt_typ is None
-    init = o.agt_state == AWAITABLE_STATE_INIT
+    aclose = _S(o).typ is None
+    init = _S(o).state == AWAITABLE_STATE_INIT
     if init:
-        if gen.ag_running_async:
-            o.agt_state = AWAITABLE_STATE_CLOSED
+        if _S(gen).running_async:
+            _S(o).state = AWAITABLE_STATE_CLOSED
             raise _athrow_running_error(o)
-        if gen.ag_closed:
-            o.agt_state = AWAITABLE_STATE_CLOSED
+        if _S(gen).closed:
+            _S(o).state = AWAITABLE_STATE_CLOSED
             raise StopAsyncIteration
         if arg is not None:
             raise RuntimeError(NON_INIT_CORO_MSG)
-        o.agt_state = AWAITABLE_STATE_ITER
-        gen.ag_running_async = True
+        _S(o).state = AWAITABLE_STATE_ITER
+        _S(gen).running_async = True
     err = None
     retval = NULL
     try:
         if init and aclose:
-            gen.ag_closed = True
+            _S(gen).closed = True
             # Do not close the generator when GeneratorExit is passed
             retval = _gen_throw(gen, False, GeneratorExit, NULL, NULL)
         elif init:
             retval = async_gen_unwrap_value(
-                gen, lambda: _gen_throw(gen, False, o.agt_typ, o.agt_val, o.agt_tb))
+                gen, lambda: _gen_throw(gen, False, _S(o).typ, _S(o).val, _S(o).tb))
         elif not aclose:
             return async_gen_unwrap_value(gen, lambda: gen_send(gen, arg))
         else:
@@ -891,12 +978,12 @@ def async_gen_athrow_send(o, arg):
             raise
     if err is None:
         if aclose and _wrapped(retval):
-            gen.ag_running_async = False
-            o.agt_state = AWAITABLE_STATE_CLOSED
+            _S(gen).running_async = False
+            _S(o).state = AWAITABLE_STATE_CLOSED
             raise RuntimeError(ASYNC_GEN_IGNORED_EXIT_MSG)
         return retval
-    gen.ag_running_async = False
-    o.agt_state = AWAITABLE_STATE_CLOSED
+    _S(gen).running_async = False
+    _S(o).state = AWAITABLE_STATE_CLOSED
     if aclose and isinstance(err, (StopAsyncIteration, GeneratorExit)):
         # aclose() must not propagate these: StopIteration says the await is done.
         _PyErr_Clear(_PyThreadState_GET())
@@ -908,28 +995,28 @@ def async_gen_athrow_send(o, arg):
 
 
 def async_gen_athrow_throw(o, args):
-    gen = o.agt_gen
-    if o.agt_state == AWAITABLE_STATE_CLOSED:
+    gen = _S(o).gen
+    if _S(o).state == AWAITABLE_STATE_CLOSED:
         raise RuntimeError("cannot reuse already awaited aclose()/athrow()")
-    if o.agt_state == AWAITABLE_STATE_INIT:
-        if gen.ag_running_async:
-            o.agt_state = AWAITABLE_STATE_CLOSED
+    if _S(o).state == AWAITABLE_STATE_INIT:
+        if _S(gen).running_async:
+            _S(o).state = AWAITABLE_STATE_CLOSED
             raise _athrow_running_error(o)
-        o.agt_state = AWAITABLE_STATE_ITER
-        gen.ag_running_async = True
+        _S(o).state = AWAITABLE_STATE_ITER
+        _S(gen).running_async = True
     err = None
     retval = NULL
     try:
-        if o.agt_typ is not None:
+        if _S(o).typ is not None:
             retval = async_gen_unwrap_value(gen, lambda: gen_throw(gen, args))
         else:
             retval = gen_throw(gen, args)
     except BaseException as e:
         err = e
-    if o.agt_typ is not None:
+    if _S(o).typ is not None:
         if err is not None:
-            gen.ag_running_async = False
-            o.agt_state = AWAITABLE_STATE_CLOSED
+            _S(gen).running_async = False
+            _S(o).state = AWAITABLE_STATE_CLOSED
             try:
                 raise err
             finally:
@@ -937,13 +1024,13 @@ def async_gen_athrow_throw(o, args):
         return retval
     # aclose() mode
     if err is None and _wrapped(retval):
-        gen.ag_running_async = False
-        o.agt_state = AWAITABLE_STATE_CLOSED
+        _S(gen).running_async = False
+        _S(o).state = AWAITABLE_STATE_CLOSED
         raise RuntimeError(ASYNC_GEN_IGNORED_EXIT_MSG)
     if err is None:
         return retval
-    gen.ag_running_async = False
-    o.agt_state = AWAITABLE_STATE_CLOSED
+    _S(gen).running_async = False
+    _S(o).state = AWAITABLE_STATE_CLOSED
     if isinstance(err, (StopAsyncIteration, GeneratorExit)):
         _PyErr_Clear(_PyThreadState_GET())
         raise StopIteration
@@ -952,6 +1039,10 @@ def async_gen_athrow_throw(o, args):
     finally:
         err = None
 
+
+for _cls in (PyAsyncGenASend, PyAsyncGenAThrow):
+    _hide_state(_cls)
+del _cls
 
 register_static_slots(PyAsyncGenASend, am_send=async_gen_asend_am_send)
 

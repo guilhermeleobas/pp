@@ -36,9 +36,9 @@ from pp.errors import (PyErr_GivenExceptionMatches, PyExceptionClass_Check, PyTh
                        _PyErr_SetRaisedException, _PyThreadState_Swap)
 from pp.frame import NULL, Frame  # noqa: F401  (NULL is part of the pp.vm API)
 from pp.funcobject import Function, PyFunction_New, bind_arguments, builtins_from_globals
-from pp.genobject import (FRAME_SUSPENDED_YIELD_FROM, FRAME_SUSPENDED_YIELD_FROM_LOCKED,
-                          PyAsyncGenObject, PyAsyncGenWrappedValue, PyCoro_CheckExact, PyCoro_GetAwaitableIter,
-                          PyCoroObject, PyGenObject, gen_is_coroutine)
+from pp.genobject import (PyAsyncGenObject, PyAsyncGenWrappedValue, PyCoro_CheckExact,
+                          PyCoro_GetAwaitableIter, PyCoroObject, PyGen_New, PyGenObject,
+                          coro_is_awaited, gen_is_coroutine)
 
 _GenericGetAttr = _obj.PyObject_GenericGetAttr
 _GenericSetAttr = _obj.PyObject_GenericSetAttr
@@ -489,8 +489,7 @@ def _PyEval_GetAwaitable(iterable, oparg):
             raise TypeError("'async with' received an object from __aexit__ that does not "
                             f"implement __await__: {tp.tp_name[:100]}")
     it = PyCoro_GetAwaitableIter(iterable)
-    if PyCoro_CheckExact(it) and it.gi_frame_state in (FRAME_SUSPENDED_YIELD_FROM,
-                                                       FRAME_SUSPENDED_YIELD_FROM_LOCKED):
+    if PyCoro_CheckExact(it) and coro_is_awaited(it):
         raise RuntimeError("coroutine is being awaited already")
     return it
 
@@ -1002,7 +1001,7 @@ class VirtualMachine:
             cls = PyAsyncGenObject
         else:
             cls = PyGenObject
-        f.return_value = cls(f, f.func, self.tstate)
+        f.return_value = PyGen_New(cls, f, f.func, self.tstate)
         f.yielded = False
         return _EXIT
 
