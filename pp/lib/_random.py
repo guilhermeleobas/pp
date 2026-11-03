@@ -12,9 +12,8 @@ bit-identical to CPython for the same seed and call sequence.
 Limitations: the type is a plain Python class (not immutable, a heap type
 whose methods are Python functions, so signatures and error text for bad
 call shapes are emulated by hand), and generation is interpreted, so it is
-far slower than C. ``getrandbits(k)`` raises ``MemoryError`` for k above
-2**25 bits (C fails only when malloc does), so ``test_getrandbits_2G_bits``
-fails. Messages for a wrong-type ``self`` and the type name in attribute
+far slower than C. ``getrandbits(k)`` raises ``MemoryError`` for k >= 2**31 bits (C fails only when
+malloc does), so ``test_getrandbits_2G_bits`` fails. Messages for a wrong-type ``self`` and the type name in attribute
 errors differ cosmetically. ``Random.__init__`` seeds directly rather than
 calling ``self.seed``, as C does. ``random.Random(str/bytes)`` needs sha512
 (``_sha2``/``_hashlib``), which pp does not provide yet.
@@ -32,9 +31,9 @@ _M32 = 0xffffffff
 _MAG01 = (0, _MATRIX_A)
 
 _int_abs = int.__abs__
-# C raises MemoryError only when malloc fails; interpreted, bigger requests
-# would run for hours (test_getrandbits_2G_bits needs 2**26 words).
-_MAX_WORDS = 1 << 20
+# C raises MemoryError only when malloc fails; interpreted, requests this big
+# would run for hours (test_getrandbits_2G_bits asks for exactly 2**31 bits).
+_MAX_BITS = 1 << 31
 
 
 def _noargs(name, args, kwargs):
@@ -210,7 +209,7 @@ class Random:
         if k <= 32:
             return genrand() >> (32 - k)
         words = (k - 1) // 32 + 1
-        if words > _MAX_WORDS:
+        if k >= _MAX_BITS:
             raise MemoryError
         # Words come least significant first; the last one is truncated.
         ws = self._words(words)
