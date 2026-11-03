@@ -45,7 +45,7 @@ Branches below are pushed to GitHub.
    that imports `asyncio` through `test.support`.
 3. **Layout**: split `pp/` into `pp/vm/` (host code) and `pp/lib/` (guest
    code) once in-flight branches have merged.
-4. **Remaining C modules → `pp/lib`** (one branch each): `math`,
+4. **Remaining C modules → `pp/lib`** (one branch each):
    `_contextvars`, `zlib`, `unicodedata`,
    `_locale`, `_typing`, `_codecs`, plus accelerator stand-ins `_pickle` and
    `_hashlib`. Iterate with `tools/host_test.py --swap <mod>`. Then a pp-native t-string
@@ -64,7 +64,7 @@ What pp does not yet provide in pure Python, against Python 3.15's
 `sys.stdlib_module_names`. The importer is in `pp/importer.py`; pure-Python
 replacements live in `pp/lib/`. Already reimplemented: `_collections`,
 `array`, `_weakref`, `gc`, `itertools`, `_sre`, `_bisect`, `_datetime`,
-`_json`, `_csv`, `_struct`, `binascii`, `_random`, `_string`.
+`_json`, `_csv`, `_struct`, `binascii`, `_random`, `_string`, `math`.
 
 ### C modules still borrowed from the host (to reimplement)
 
@@ -72,7 +72,6 @@ replacements live in `pp/lib/`. Already reimplemented: `_collections`,
 
 | Module | Used by | Status |
 |---|---|---|
-| `math` | `fractions`, `statistics`, `random`, `decimal`, ... | |
 | `_contextvars` | `contextvars`, `asyncio`, `decimal` | |
 | `zlib` | `gzip`, `zipfile` | |
 | `unicodedata` | `unicodedata`, normalization in `str` helpers | |
@@ -93,7 +92,7 @@ pure Python), plus `sys` and `builtins`, which the VM serves itself.
 | Hashing | `_hashlib`, `_md5`, `_sha1`, `_sha2`, `_sha3`, `_blake2`, `_hmac` | `hashlib`, `hmac`, `secrets`, `random` seeding by bytes |
 | Compression | `_bz2`, `_lzma`, `_zstd` (and borrowed `zlib`) | `bz2`, `lzma`, `compression.zstd`, `tarfile`, `zipfile` |
 | XML | `pyexpat`, `_elementtree` (Python fallback exists) | `xml.parsers.expat`, `xml.dom.minidom`, `plistlib` |
-| Numbers | `cmath`, `_math_integer`, `_decimal` (Python fallback `_pydecimal` exists), `_statistics` (fallback exists) | `cmath` |
+| Numbers | `cmath`, `_decimal` (Python fallback `_pydecimal` exists), `_statistics` (fallback exists) | `cmath` |
 | CJK codecs | `_multibytecodec`, `_codecs_cn`, `_codecs_hk`, `_codecs_iso2022`, `_codecs_jp`, `_codecs_kr`, `_codecs_tw` | those encodings |
 | Async and concurrency | `_asyncio` (fallback exists), `_queue` (fallback exists), `_multiprocessing`, `_posixshmem`, `_interpreters`, `_interpchannels`, `_interpqueues` | `multiprocessing`, `concurrent.interpreters` (also blocked on async opcodes) |
 | Introspection and tooling | `_lsprof`, `_tracemalloc`, `_symtable`, `_suggestions`, `_remote_debugging`, `_sysconfig` | `cProfile`, `tracemalloc`, `symtable`, error-name suggestions |

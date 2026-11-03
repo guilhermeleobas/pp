@@ -6,9 +6,9 @@ A module counts as **pass** when its CPython test file runs to completion under 
 (`python -m pp run tools/run_unittest.py test.test_<module>`). The test file and every pure-Python module it
 imports run in the VM; C modules come from the host only if listed in `pp/importer.py`.
 
-Host C modules still borrowed: 11 temporary (to replace with Python), 16 permanent (host boundary).
+Host C modules still borrowed: 10 temporary (to replace with Python), 16 permanent (host boundary).
 
-Temporary: `_contextvars`, `_locale`, `_posixsubprocess`, `_socket`, `faulthandler`, `fcntl`, `math`, `resource`, `select`, `unicodedata`, `zlib`
+Temporary: `_contextvars`, `_locale`, `_posixsubprocess`, `_socket`, `faulthandler`, `fcntl`, `resource`, `select`, `unicodedata`, `zlib`
 
 ## Summary
 
