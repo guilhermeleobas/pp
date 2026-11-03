@@ -40,6 +40,7 @@ class SwapFinder(importlib.abc.MetaPathFinder):
 EXTRA_WRAPPERS = {
     "binascii": ["base64"],
     "_sre": ["re"],
+    "zlib": ["gzip", "zipfile", "tarfile", "shutil", "_compression"],
 }
 
 
