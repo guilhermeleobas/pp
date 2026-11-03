@@ -32,7 +32,7 @@ TIERS = {
     4: ["bisect", "colorsys", "copy", "dataclasses", "graphlib", "json", "fractions", "statistics", "shlex",
         "glob", "posixpath", "tomllib", "base64", "html", "csv", "ipaddress", "random", "typing", "decimal",
         "datetime", "inspect", "dis", "ast", "queue", "calendar", "optparse", "configparser", "array", "gc",
-        "struct", "binascii"],
+        "struct", "binascii", "zlib", "gzip"],
 }
 TRACKED = {m: t for t, mods in TIERS.items() for m in mods}
 

@@ -49,7 +49,6 @@ HOST_MODULES_TEMPORARY = frozenset({
     "math",
     "_string",       # string.Formatter helpers
     "_contextvars",
-    "zlib",
     "unicodedata",
     "_locale",
     "select",
