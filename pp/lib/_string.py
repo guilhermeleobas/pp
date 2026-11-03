@@ -3,6 +3,14 @@
 The parsing rules follow Objects/stringlib/unicode_format.h.  The returned
 iterators parse on demand, including reporting malformed input only when the
 corresponding part is consumed.
+
+Differences from the C module (accepted limitations, see BLOCKERS.md):
+the two iterator types are plain Python classes made to look like CPython's
+(``formatteriterator`` / ``fieldnameiterator``, module ``builtins``; direct
+instantiation, pickling and subclassing raise the C errors), but they are not
+immutable static types, so attributes can be set on them and ``dir()``
+shows their Python methods; parsing is interpreted and much slower than C;
+argument-count errors are reproduced by hand for METH_O.
 """
 
 import sys
@@ -22,8 +30,37 @@ def _integer(text):
     return value
 
 
-class _FieldNameIterator:
-    def __init__(self, text, index):
+class _Iterator:
+    __slots__ = ()
+
+    def __new__(cls, *args, **kwargs):
+        raise TypeError(f"cannot create '{cls.__qualname__}' instances")
+
+    def __init_subclass__(cls, **kwargs):
+        base = cls.__bases__[0]
+        if base is not _Iterator:
+            raise TypeError(f"type '{base.__qualname__}' is not an acceptable base type")
+
+    def __reduce_ex__(self, protocol):
+        raise TypeError(f"cannot pickle '{type(self).__qualname__}' object")
+
+    def __reduce__(self):
+        raise TypeError(f"cannot pickle '{type(self).__qualname__}' object")
+
+    def __repr__(self):
+        return f"<{type(self).__qualname__} object at {id(self):#x}>"
+
+
+def _make(cls, *args):
+    self = object.__new__(cls)
+    cls._setup(self, *args)
+    return self
+
+
+class _FieldNameIterator(_Iterator):
+    __slots__ = ('text', 'index')
+
+    def _setup(self, text, index):
         self.text = text
         self.index = index
 
@@ -62,6 +99,11 @@ class _FieldNameIterator:
         return is_attr, name
 
 
+def _rename(cls, name):
+    cls.__module__ = 'builtins'
+    cls.__name__ = cls.__qualname__ = name
+
+
 def _one_arg(name, args, kwargs):
     # METH_O argument checking (Objects/methodobject.c)
     if kwargs:
@@ -79,11 +121,13 @@ def formatter_field_name_split(*args, **kwargs):
     index = 0
     while index < len(text) and text[index] not in '.[':
         index += 1
-    return _integer(text[:index]), _FieldNameIterator(text, index)
+    return _integer(text[:index]), _make(_FieldNameIterator, text, index)
 
 
-class _FormatterIterator:
-    def __init__(self, text):
+class _FormatterIterator(_Iterator):
+    __slots__ = ('text', 'index')
+
+    def _setup(self, text):
         self.text = text
         self.index = 0
 
@@ -176,4 +220,8 @@ def formatter_parser(*args, **kwargs):
     text = _one_arg("formatter_parser", args, kwargs)
     if not isinstance(text, str):
         raise TypeError(f"expected str, got {type(text).__name__}")
-    return _FormatterIterator(str.__str__(text))
+    return _make(_FormatterIterator, str.__str__(text))
+
+
+_rename(_FieldNameIterator, 'fieldnameiterator')
+_rename(_FormatterIterator, 'formatteriterator')
